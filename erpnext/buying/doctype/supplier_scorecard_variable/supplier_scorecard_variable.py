@@ -7,7 +7,7 @@ import sys
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.query_builder.functions import Sum
+from frappe.query_builder.functions import Sum, Count
 from frappe.utils import getdate
 
 
@@ -235,6 +235,18 @@ def get_total_received(scorecard):
 	supplier = frappe.get_doc("Supplier", scorecard.supplier)
 
 	# Look up all PO Items with delivery dates between our dates
+	PR = frappe.qb.DocType("Purchase Receipt")
+	PRI = frappe.qb.DocType("Purchase Receipt Item")
+
+	data = (
+		frappe.qb.from_(PR)
+		.join(PRI).on(PRI.parent == PR.name)
+		.select(Count(PRI.base_amount))
+		.where(PR.supplier == supplier.name)
+		.where(PR.posting_date[scorecard.start_date : scorecard.end_date])
+		.where(PRI.docstatus == 1)
+		).run()[0][0]
+
 	data = frappe.db.sql(
 		"""
 			SELECT
