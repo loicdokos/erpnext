@@ -52,11 +52,16 @@ class ModeofPayment(Document):
 
 	def validate_pos_mode_of_payment(self):
 		if not self.enabled:
-			pos_profiles = frappe.db.sql(
-				"""SELECT sip.parent FROM `tabSales Invoice Payment` sip
-				WHERE sip.parenttype = 'POS Profile' and sip.mode_of_payment = %s""",
-				(self.name),
+			SalesInvoicePayment = frappe.qb.DocType("Sales Invoice Payment")
+
+			query = (
+				frappe.qb.from_(SalesInvoicePayment)
+				.select(SalesInvoicePayment.parent)
+				.where(SalesInvoicePayment.parenttype == "POS Profile")
+				.where(SalesInvoicePayment.mode_of_payment == self.name)
 			)
+
+			pos_profiles = query.run()
 			pos_profiles = list(map(lambda x: x[0], pos_profiles))
 
 			if pos_profiles:
