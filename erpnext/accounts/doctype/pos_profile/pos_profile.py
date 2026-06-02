@@ -345,25 +345,50 @@ def set_default_profile(pos_profile: str, company: str):
 	modified = now()
 	user = frappe.session.user
 
-	if pos_profile and company:
-		frappe.db.sql(
-			""" update `tabPOS Profile User` pfu, `tabPOS Profile` pf
-			set
-				pfu.default = 0, pf.modified = %s, pf.modified_by = %s
-			where
-				pfu.user = %s and pf.name = pfu.parent and pf.company = %s
-				and pfu.default = 1""",
-			(modified, user, user, company),
-			auto_commit=1,
-		)
+	if not (pos_profile and company):
+		return
 
-		frappe.db.sql(
-			""" update `tabPOS Profile User` pfu, `tabPOS Profile` pf
-			set
-				pfu.default = 1, pf.modified = %s, pf.modified_by = %s
-			where
-				pfu.user = %s and pf.name = pfu.parent and pf.company = %s and pf.name = %s
-			""",
-			(modified, user, user, company, pos_profile),
-			auto_commit=1,
+	POSProfile = frappe.qb.DocType("POS Profile")
+	POSProfileUser = frappe.qb.DocType("POS Profile User")
+
+	subquery_company_profiles = (
+		frappe.qb.from_(POSProfile).select(POSProfile.name).where(POSProfile.company == company)
+	)
+
+	(
+		frappe.qb.update(POSProfileUser)
+		.set(POSProfileUser["default"], 0)
+		.where(POSProfileUser.user == user)
+		.where(POSProfileUser["default"] == 1)
+		.where(POSProfileUser.parent.isin(subquery_company_profiles))
+	).run()
+
+	(
+		frappe.qb.update(POSProfile)
+		.set(POSProfile.modified, modified)
+		.set(POSProfile.modified_by, user)
+		.where(POSProfile.company == company)
+		.where(
+			POSProfile.name.isin(
+				frappe.qb.from_(POSProfileUser)
+				.select(POSProfileUser.parent)
+				.where(POSProfileUser.user == user)
+			)
 		)
+	).run()
+
+	(
+		frappe.qb.update(POSProfileUser)
+		.set(POSProfileUser["default"], 1)
+		.where(POSProfileUser.user == user)
+		.where(POSProfileUser.parent == pos_profile)
+		.where(POSProfileUser.parent.isin(subquery_company_profiles))
+	).run()
+
+	(
+		frappe.qb.update(POSProfile)
+		.set(POSProfile.modified, modified)
+		.set(POSProfile.modified_by, user)
+		.where(POSProfile.name == pos_profile)
+		.where(POSProfile.company == company)
+	).run()
