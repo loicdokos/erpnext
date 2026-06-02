@@ -287,6 +287,8 @@ def get_child_nodes(group_type, root):
 @frappe.whitelist()
 @frappe.validate_and_sanitize_search_inputs
 def pos_profile_query(doctype: str, txt: str, searchfield: str, start: int, page_len: int, filters: dict):
+	from frappe.query_builder.functions import IfNull
+
 	user = frappe.session["user"]
 	company = filters.get("company") or frappe.defaults.get_user_default("company")
 
@@ -298,33 +300,42 @@ def pos_profile_query(doctype: str, txt: str, searchfield: str, start: int, page
 		"txt": "%%%s%%" % txt,
 	}
 
-	pos_profile = frappe.db.sql(
-		"""select pf.name
-		from
-			`tabPOS Profile` pf, `tabPOS Profile User` pfu
-		where
-			pfu.parent = pf.name and pfu.user = %(user)s and pf.company = %(company)s
-			and (pf.name like %(txt)s)
-			and pf.disabled = 0 limit %(page_len)s offset %(start)s""",
-		args,
+	POSProfile = frappe.qb.DocType("POS Profile")
+	POSProfileUser = frappe.qb.DocType("POS Profile User")
+
+	query = (
+		frappe.qb.from_(POSProfile)
+		.join(POSProfileUser)
+		.on(POSProfileUser.parent == POSProfile.name)
+		.select(POSProfile.name)
+		.where(POSProfileUser.user == args.get("user"))
+		.where(POSProfile.company == args.get("company"))
+		.where(POSProfile.name.like(args.get("txt")))
+		.where(POSProfile.disabled == 0)
+		.limit(args.get("page_len"))
+		.offset(args.get("start"))
 	)
+
+	pos_profile = query.run()
 
 	if not pos_profile:
 		del args["user"]
 
-		pos_profile = frappe.db.sql(
-			"""select pf.name
-			from
-				`tabPOS Profile` pf left join `tabPOS Profile User` pfu
-			on
-				pf.name = pfu.parent
-			where
-				ifnull(pfu.user, '') = ''
-				and pf.company = %(company)s
-				and pf.name like %(txt)s
-				and pf.disabled = 0""",
-			args,
+		POSProfile = frappe.qb.DocType("POS Profile")
+		POSProfileUser = frappe.qb.DocType("POS Profile User")
+
+		query = (
+			frappe.qb.from_(POSProfile)
+			.left_join(POSProfileUser)
+			.on(POSProfileUser.parent == POSProfile.name)
+			.select(POSProfile.name)
+			.where(IfNull(POSProfileUser.user, "") == "")
+			.where(POSProfile.company == args.get("company"))
+			.where(POSProfile.name.like(args.get("txt")))
+			.where(POSProfile.disabled == 0)
 		)
+
+		pos_profile = query.run()
 
 	return pos_profile
 
