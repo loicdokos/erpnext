@@ -271,11 +271,17 @@ def get_permitted_nodes(group_type):
 
 def get_child_nodes(group_type, root):
 	lft, rgt = frappe.db.get_value(group_type, root, ["lft", "rgt"])
-	return frappe.db.sql(
-		f""" Select name, lft, rgt from `tab{group_type}` where
-			lft >= {lft} and rgt <= {rgt} order by lft""",
-		as_dict=1,
+	TargetDocType = frappe.qb.DocType(group_type)
+
+	query = (
+		frappe.qb.from_(TargetDocType)
+		.select(TargetDocType.name, TargetDocType.lft, TargetDocType.rgt)
+		.where(TargetDocType.lft >= lft)
+		.where(TargetDocType.rgt <= rgt)
+		.order_by(TargetDocType.lft)
 	)
+
+	return query.run(as_dict=1)
 
 
 @frappe.whitelist()
