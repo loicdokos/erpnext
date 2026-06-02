@@ -963,15 +963,17 @@ def get_bundle_availability(bundle_item_code, warehouse):
 
 
 def get_bin_qty(item_code, warehouse):
-	bin_qty = frappe.db.sql(
-		"""select actual_qty from `tabBin`
-		where item_code = %s and warehouse = %s
-		limit 1""",
-		(item_code, warehouse),
-		as_dict=1,
-	)
+	Bin = frappe.qb.DocType("Bin")
 
-	return bin_qty[0].actual_qty or 0 if bin_qty else 0
+	query = (
+		frappe.qb.from_(Bin)
+		.select(Bin.actual_qty)
+		.where(Bin.item_code == item_code)
+		.where(Bin.warehouse == warehouse)
+		.limit(1)
+	)
+	actual_qty = query.run(pluck=True)
+	return actual_qty[0] if actual_qty else 0
 
 
 def get_pos_reserved_qty(item_code, warehouse):
