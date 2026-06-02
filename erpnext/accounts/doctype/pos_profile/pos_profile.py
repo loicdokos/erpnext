@@ -118,15 +118,20 @@ class POSProfile(Document):
 
 	def validate_default_profile(self):
 		for row in self.applicable_for_users:
-			res = frappe.db.sql(
-				"""select pf.name
-				from
-					`tabPOS Profile User` pfu, `tabPOS Profile` pf
-				where
-					pf.name = pfu.parent and pfu.user = %s and pf.name != %s and pf.company = %s
-					and pfu.default=1 and pf.disabled = 0""",
-				(row.user, self.name, self.company),
+			POSProfile = frappe.qb.DocType("POS Profile")
+			POSProfileUser = frappe.qb.DocType("POS Profile User")
+			query = (
+				frappe.qb.from_(POSProfile)
+				.join(POSProfileUser)
+				.on(POSProfileUser.parent == POSProfile.name)
+				.select(POSProfile.name)
+				.where(POSProfileUser.user == row.user)
+				.where(POSProfile.name != self.name)
+				.where(POSProfile.company == self.company)
+				.where(POSProfileUser["default"] == 1)
+				.where(POSProfile.disabled == 0)
 			)
+			res = query.run()
 
 			if row.default and res:
 				msgprint(
