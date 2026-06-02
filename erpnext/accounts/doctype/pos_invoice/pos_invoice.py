@@ -489,6 +489,8 @@ class POSInvoice(SalesInvoice):
 			frappe.throw(error_msg, title=_("Serial / Batch Bundle Missing"), as_list=True)
 
 	def validate_return_items_qty(self):
+		from pypika import Criterion
+
 		if not self.get("is_return"):
 			return
 
@@ -503,20 +505,22 @@ class POSInvoice(SalesInvoice):
 			if d.get("serial_no"):
 				serial_nos = get_serial_nos(d.serial_no)
 				for sr in serial_nos:
-					serial_no_exists = frappe.db.sql(
-						"""
-						SELECT name
-						FROM `tabPOS Invoice Item`
-						WHERE
-							parent = %s
-							and (serial_no = %s
-								or serial_no like %s
-								or serial_no like %s
-								or serial_no like %s
-							)
-					""",
-						(self.return_against, sr, sr + "\n%", "%\n" + sr, "%\n" + sr + "\n%"),
+					POSInvoiceItem = frappe.qb.DocType("POS Invoice Item")
+					serial_conditions = Criterion.any(
+						[
+							POSInvoiceItem.serial_no == sr,
+							POSInvoiceItem.serial_no.like(f"{sr}\n%"),
+							POSInvoiceItem.serial_no.like(f"%\n{sr}"),
+							POSInvoiceItem.serial_no.like(f"%\n{sr}\n%"),
+						]
 					)
+					query = (
+						frappe.qb.from_(POSInvoiceItem)
+						.select(POSInvoiceItem.name)
+						.where(POSInvoiceItem.parent == self.return_against)
+						.where(serial_conditions)
+					)
+					serial_no_exists = query.run()
 
 					if not serial_no_exists:
 						bold_return_against = frappe.bold(self.return_against)
