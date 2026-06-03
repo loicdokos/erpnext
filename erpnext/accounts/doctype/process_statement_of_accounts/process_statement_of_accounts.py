@@ -474,31 +474,22 @@ def get_customer_emails(customer_name: str, primary_mandatory: str | int, billin
 	and Primary email- email with Is Primary checked"""
 
 	frappe.has_permission("Customer", "read", customer_name, throw=True)
-
-	billing_email = frappe.db.sql(
-		"""
-		SELECT
-			email.email_id
-		FROM
-			`tabContact Email` AS email
-		JOIN
-			`tabDynamic Link` AS link
-		ON
-			email.parent=link.parent
-		JOIN
-			`tabContact` AS contact
-		ON
-			contact.name=link.parent
-		WHERE
-			link.link_doctype='Customer'
-			and link.link_name=%s
-			and contact.is_billing_contact=1
-			{mcond}
-		ORDER BY
-			contact.creation desc
-		""".format(mcond=get_match_cond("Contact")),
-		customer_name,
+	ContactEmail = frappe.qb.DocType("Contact Email")
+	DynamicLink = frappe.qb.DocType("Dynamic Link")
+	Contact = frappe.qb.DocType("Contact")
+	query = (
+		frappe.get_query("Contact Email", ignore_permissions=False)
+		.join(DynamicLink)
+		.on(ContactEmail.parent == DynamicLink.parent)
+		.join(Contact)
+		.on(Contact.name == DynamicLink.parent)
+		.select(ContactEmail.email_id)
+		.where(DynamicLink.link_doctype == "Customer")
+		.where(DynamicLink.link_name == customer_name)
+		.where(Contact.is_billing_contact == 1)
+		.orderby(Contact.creation, order=frappe.qb.Order.desc)
 	)
+	billing_email = query.run()
 
 	if len(billing_email) == 0 or (billing_email[0][0] is None):
 		if billing_and_primary:
