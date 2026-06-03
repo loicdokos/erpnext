@@ -56,11 +56,14 @@ def valdiate_taxes_and_charges_template(doc):
 	# 	doc.is_default = 1
 
 	if doc.is_default == 1:
-		frappe.db.sql(
-			f"""update `tab{doc.doctype}` set is_default = 0
-			where is_default = 1 and name != %s and company = %s""",
-			(doc.name, doc.company),
-		)
+		TargetDocType = frappe.qb.DocType(doc.doctype)
+		(
+			frappe.qb.update(TargetDocType)
+			.set(TargetDocType.is_default, 0)
+			.where(TargetDocType.is_default == 1)
+			.where(TargetDocType.name != doc.name)
+			.where(TargetDocType.company == doc.company)
+		).run()
 
 	validate_disabled(doc)
 
