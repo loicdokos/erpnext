@@ -171,8 +171,9 @@ def apply_multiple_pricing_rules(pricing_rules):
 
 
 def _get_tree_conditions(args, parenttype, table, allow_blank=True):
+	from pypika.functions import Coalesce
+
 	field = frappe.scrub(parenttype)
-	condition = ""
 	if args.get(field):
 		if not frappe.flags.tree_conditions:
 			frappe.flags.tree_conditions = {}
@@ -185,10 +186,9 @@ def _get_tree_conditions(args, parenttype, table, allow_blank=True):
 		except TypeError:
 			frappe.throw(_("Invalid {0}").format(args.get(field)))
 
-		parent_groups = frappe.db.sql_list(
-			"""select name from `tab{}`
-			where lft<={} and rgt>={}""".format(parenttype, "%s", "%s"),
-			(lft, rgt),
+		PT = frappe.qb.DocType(parenttype)
+		parent_groups = (frappe.qb.from_(PT).select(PT.name).where(PT.lft <= lft).where(PT.rgt >= rgt)).run(
+			pluck="name"
 		)
 
 		if parenttype in ["Customer Group", "Item Group", "Territory"]:
@@ -207,16 +207,14 @@ def _get_tree_conditions(args, parenttype, table, allow_blank=True):
 		if parent_groups:
 			if allow_blank:
 				parent_groups.append("")
-			condition = "ifnull({table}.{field}, '') in ({parent_groups})".format(
-				table=table, field=field, parent_groups=", ".join(frappe.db.escape(d) for d in parent_groups)
-			)
+			criterion = Coalesce(table[field], "").isin(parent_groups)
+			frappe.flags.tree_conditions[key] = criterion
+			return criterion
 
-			frappe.flags.tree_conditions[key] = condition
+	if allow_blank:
+		return Coalesce(table[field], "") == ""
 
-	elif allow_blank:
-		condition = f"ifnull({table}.{field}, '') = ''"
-
-	return condition
+	return None
 
 
 def get_other_conditions(conditions, values, args):
