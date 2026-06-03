@@ -1057,11 +1057,12 @@ class JournalEntry(AccountsController):
 				)
 
 			if d.reference_type == "Purchase Invoice" and d.debit:
-				bill_no = frappe.db.sql(
-					"""select bill_no, bill_date
-					from `tabPurchase Invoice` where name=%s""",
-					d.reference_name,
-				)
+				PI_bill = frappe.qb.DocType("Purchase Invoice")
+				bill_no = (
+					frappe.qb.from_(PI_bill)
+					.select(PI_bill.bill_no, PI_bill.bill_date)
+					.where(PI_bill.name == d.reference_name)
+				).run()
 				if (
 					bill_no
 					and bill_no[0][0]
