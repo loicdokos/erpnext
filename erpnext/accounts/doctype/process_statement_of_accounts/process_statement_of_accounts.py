@@ -364,16 +364,24 @@ def get_customers_based_on_territory_or_customer_group(customer_collection, coll
 
 def get_customers_based_on_sales_person(sales_person):
 	lft, rgt = frappe.db.get_value("Sales Person", sales_person, ["lft", "rgt"])
-	records = frappe.db.sql(
-		"""
-		select distinct parent, parenttype
-		from `tabSales Team` steam
-		where parenttype = 'Customer'
-			and exists(select name from `tabSales Person` where lft >= %s and rgt <= %s and name = steam.sales_person)
-	""",
-		(lft, rgt),
-		as_dict=1,
+	SalesTeam = frappe.qb.DocType("Sales Team")
+	SalesPerson = frappe.qb.DocType("Sales Person")
+	subquery = (
+		frappe.qb.from_(SalesPerson)
+		.select(SalesPerson.name)
+		.where(SalesPerson.lft >= lft)
+		.where(SalesPerson.rgt <= rgt)
+		.where(SalesPerson.name == SalesTeam.sales_person)
 	)
+	query = (
+		frappe.qb.from_(SalesTeam)
+		.select(SalesTeam.parent, SalesTeam.parenttype)
+		.distinct()
+		.where(SalesTeam.parenttype == "Customer")
+		.where(subquery.exists())
+	)
+
+	records = query.run(as_dict=1)
 	sales_person_records = frappe._dict()
 	for d in records:
 		sales_person_records.setdefault(d.parenttype, set()).add(d.parent)
