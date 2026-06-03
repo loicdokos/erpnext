@@ -505,36 +505,27 @@ def get_qty_amount_data_for_cumulative(pr_doc, doc, items=None):
 	child_doctype = f"{doctype} Item"
 	apply_on = frappe.scrub(pr_doc.get("apply_on"))
 
-	values = [pr_doc.valid_from, pr_doc.valid_upto]
-	condition = ""
+	Child = frappe.qb.DocType(child_doctype)
+	DT = frappe.qb.DocType(doctype)
+
+	query = (
+		frappe.qb.from_(Child)
+		.join(DT)
+		.on(Child.parent == DT.name)
+		.select(Child.stock_qty, Child.amount)
+		.where(DT[date_field].between(pr_doc.valid_from, pr_doc.valid_upto))
+		.where(DT.docstatus == 1)
+		.groupby(Child.name)
+	)
 
 	if pr_doc.warehouse:
 		warehouses = get_child_warehouses(pr_doc.warehouse)
-
-		condition += """ and `tab{child_doc}`.warehouse in ({warehouses})
-			""".format(child_doc=child_doctype, warehouses=",".join(["%s"] * len(warehouses)))
-
-		values.extend(warehouses)
+		query = query.where(Child.warehouse.isin(warehouses))
 
 	if items:
-		condition += " and `tab{child_doc}`.{apply_on} in ({items})".format(
-			child_doc=child_doctype, apply_on=apply_on, items=",".join(["%s"] * len(items))
-		)
+		query = query.where(Child[apply_on].isin(items))
 
-		values.extend(items)
-
-	data_set = frappe.db.sql(
-		f""" SELECT `tab{child_doctype}`.stock_qty,
-			`tab{child_doctype}`.amount
-		FROM `tab{child_doctype}`, `tab{doctype}`
-		WHERE
-			`tab{child_doctype}`.parent = `tab{doctype}`.name and `tab{doctype}`.{date_field}
-			between %s and %s and `tab{doctype}`.docstatus = 1
-			{condition} group by `tab{child_doctype}`.name
-	""",
-		tuple(values),
-		as_dict=1,
-	)
+	data_set = query.run(as_dict=1)
 
 	for data in data_set:
 		sum_qty += data.get("stock_qty")
