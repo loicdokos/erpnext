@@ -215,14 +215,13 @@ class QualityInspection(Document):
 
 		if self.reference_type == "Job Card":
 			if self.reference_name:
-				frappe.db.sql(
-					f"""
-					UPDATE `tab{self.reference_type}`
-					SET quality_inspection = %s, modified = %s
-					WHERE name = %s and production_item = %s
-				""",
-					(quality_inspection, self.modified, self.reference_name, self.item_code),
-				)
+				RefDoc = frappe.qb.DocType(self.reference_type)
+				(
+					frappe.qb.update(RefDoc)
+					.set(RefDoc.quality_inspection, quality_inspection)
+					.set(RefDoc.modified, self.modified)
+					.where((RefDoc.name == self.reference_name) & (RefDoc.production_item == self.item_code))
+				).run()
 
 		else:
 			doctype = self.reference_type + " Item"
