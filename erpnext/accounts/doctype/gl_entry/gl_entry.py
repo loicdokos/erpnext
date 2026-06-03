@@ -328,14 +328,18 @@ class GLEntry(Document):
 
 
 def validate_balance_type(account, adv_adj=False):
+	from pypika.functions import Sum
+
 	if not adv_adj and account:
 		balance_must_be = frappe.get_cached_value("Account", account, "balance_must_be")
 		if balance_must_be:
-			balance = frappe.db.sql(
-				"""select sum(debit) - sum(credit)
-				from `tabGL Entry` where is_cancelled = 0 and account = %s""",
-				account,
-			)[0][0]
+			GLE = frappe.qb.DocType("GL Entry")
+			balance = (
+				frappe.qb.from_(GLE)
+				.select(Sum(GLE.debit) - Sum(GLE.credit))
+				.where(GLE.is_cancelled == 0)
+				.where(GLE.account == account)
+			).run()[0][0]
 
 			if (balance_must_be == "Debit" and flt(balance) < 0) or (
 				balance_must_be == "Credit" and flt(balance) > 0
