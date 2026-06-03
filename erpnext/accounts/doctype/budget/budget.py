@@ -782,15 +782,29 @@ def get_ordered_amount(params):
 
 
 def get_actual_expense(params):
+	from pypika.terms import ExistsCriterion
+
 	if not params.budget_against_doctype:
 		params.budget_against_doctype = frappe.unscrub(params.budget_against_field)
 
 	budget_against_field = params.get("budget_against_field")
-	condition1 = " and gle.posting_date <= %(month_end_date)s" if params.get("month_end_date") else ""
 
-	date_condition = (
-		f"and gle.posting_date between '{params.budget_start_date}' and '{params.budget_end_date}'"
+	GLEntry = frappe.qb.DocType("GL Entry")
+
+	query = (
+		frappe.qb.from_(GLEntry)
+		.select(Sum(GLEntry.debit) - Sum(GLEntry.credit))
+		.where(GLEntry.is_cancelled == 0)
+		.where(GLEntry.account == params.account)
+		.where(GLEntry.company == params.company)
+		.where(GLEntry.docstatus == 1)
 	)
+
+	if params.get("month_end_date"):
+		query = query.where(GLEntry.posting_date <= params.month_end_date)
+
+	if params.budget_start_date and params.budget_end_date:
+		query = query.where(GLEntry.posting_date.between(params.budget_start_date, params.budget_end_date))
 
 	if params.is_tree:
 		lft_rgt = frappe.db.get_value(
@@ -798,37 +812,21 @@ def get_actual_expense(params):
 		)
 		params.update(lft_rgt)
 
-		condition2 = f"""
-			and exists(
-				select name from `tab{params.budget_against_doctype}`
-				where lft >= %(lft)s and rgt <= %(rgt)s
-				and name = gle.{budget_against_field}
-			)
-		"""
+		tree_doctype = frappe.qb.DocType(params.budget_against_doctype)
+		subquery = (
+			frappe.qb.from_(tree_doctype)
+			.select(tree_doctype.name)
+			.where(tree_doctype.lft >= params.lft)
+			.where(tree_doctype.rgt <= params.rgt)
+			.where(tree_doctype.name == getattr(GLEntry, budget_against_field))
+		)
+		query = query.where(ExistsCriterion(subquery))
 	else:
-		condition2 = f"""
-			and gle.{budget_against_field} = %({budget_against_field})s
-		"""
+		query = query.where(getattr(GLEntry, budget_against_field) == params.get(budget_against_field))
 
-	amount = flt(
-		frappe.db.sql(
-			f"""
-				select sum(gle.debit) - sum(gle.credit)
-				from `tabGL Entry` gle
-				where
-					is_cancelled = 0
-					and gle.account = %(account)s
-					{condition1}
-					{date_condition}
-					and gle.company = %(company)s
-					and gle.docstatus = 1
-					{condition2}
-			""",
-			params,
-		)[0][0]
-	)  # nosec
+	result = query.run(as_list=True)
 
-	return amount
+	return flt(result[0][0]) if result else 0
 
 
 def get_accumulated_monthly_budget(budget_name, posting_date):
