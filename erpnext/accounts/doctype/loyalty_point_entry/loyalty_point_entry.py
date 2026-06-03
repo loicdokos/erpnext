@@ -63,14 +63,18 @@ def get_loyalty_point_entries(customer, loyalty_program, company, expiry_date=No
 
 
 def get_redemption_details(customer, loyalty_program, company):
-	return frappe._dict(
-		frappe.db.sql(
-			"""
-		select redeem_against, sum(loyalty_points)
-		from `tabLoyalty Point Entry`
-		where customer=%s and loyalty_program=%s and loyalty_points<0 and company=%s
-		group by redeem_against
-	""",
-			(customer, loyalty_program, company),
-		)
+	from frappe.query_builder.functions import Sum
+
+	LoyaltyPointEntry = frappe.qb.DocType("Loyalty Point Entry")
+
+	query = (
+		frappe.qb.from_(LoyaltyPointEntry)
+		.select(LoyaltyPointEntry.redeem_against, Sum(LoyaltyPointEntry.loyalty_points))
+		.where(LoyaltyPointEntry.customer == customer)
+		.where(LoyaltyPointEntry.loyalty_program == loyalty_program)
+		.where(LoyaltyPointEntry.loyalty_points < 0)
+		.where(LoyaltyPointEntry.company == company)
+		.groupby(LoyaltyPointEntry.redeem_against)
 	)
+
+	return frappe._dict(query.run())
