@@ -176,15 +176,21 @@ class Account(NestedSet):
 			db_value = self.get_doc_before_save()
 			if db_value:
 				if self.report_type != db_value.report_type:
-					frappe.db.sql(
-						"update `tabAccount` set report_type=%s where lft > %s and rgt < %s",
-						(self.report_type, self.lft, self.rgt),
-					)
+					Account = frappe.qb.DocType("Account")
+					(
+						frappe.qb.update(Account)
+						.set(Account.report_type, self.report_type)
+						.where(Account.lft > self.lft)
+						.where(Account.rgt < self.rgt)
+					).run()
 				if self.root_type != db_value.root_type:
-					frappe.db.sql(
-						"update `tabAccount` set root_type=%s where lft > %s and rgt < %s",
-						(self.root_type, self.lft, self.rgt),
-					)
+					Account = frappe.qb.DocType("Account")
+					(
+						frappe.qb.update(Account)
+						.set(Account.root_type, self.root_type)
+						.where(Account.lft > self.lft)
+						.where(Account.rgt < self.rgt)
+					).run()
 
 		if self.root_type and not self.report_type:
 			self.report_type = (
