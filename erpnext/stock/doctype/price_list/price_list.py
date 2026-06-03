@@ -47,11 +47,15 @@ class PriceList(Document):
 				frappe.set_value("Buying Settings", "Buying Settings", "buying_price_list", self.name)
 
 	def update_item_price(self):
-		frappe.db.sql(
-			"""update `tabItem Price` set currency=%s,
-			buying=%s, selling=%s, modified=NOW() where price_list=%s""",
-			(self.currency, cint(self.buying), cint(self.selling), self.name),
-		)
+		ItemPrice = frappe.qb.DocType("Item Price")
+		(
+			frappe.qb.update(ItemPrice)
+			.set(ItemPrice.currency, self.currency)
+			.set(ItemPrice.buying, cint(self.buying))
+			.set(ItemPrice.selling, cint(self.selling))
+			.set(ItemPrice.modified, frappe.utils.now())
+			.where(ItemPrice.price_list == self.name)
+		).run()
 
 	def on_trash(self):
 		self.delete_price_list_details_key()
