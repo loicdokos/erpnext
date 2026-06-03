@@ -535,18 +535,14 @@ def get_qty_amount_data_for_cumulative(pr_doc, doc, items=None):
 
 
 def apply_pricing_rule_on_transaction(doc):
-	conditions = "apply_on = 'Transaction'"
+	PR = frappe.qb.DocType("Pricing Rule")
 
-	values = {}
-	conditions = get_other_conditions(conditions, values, doc)
+	query = frappe.qb.from_(PR).select("*").where(PR.apply_on == "Transaction").where(PR.disable == 0)
 
-	pricing_rules = frappe.db.sql(
-		f""" Select `tabPricing Rule`.* from `tabPricing Rule`
-		where  {conditions} and `tabPricing Rule`.disable = 0
-	""",
-		values,
-		as_dict=1,
-	)
+	for criterion in get_other_conditions(PR, doc):
+		query = query.where(criterion)
+
+	pricing_rules = query.run(as_dict=1)
 
 	if pricing_rules:
 		pricing_rules = filter_pricing_rules_for_qty_amount(doc.total_qty, doc.total, pricing_rules)
