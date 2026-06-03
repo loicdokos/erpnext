@@ -427,12 +427,19 @@ class DeliveryNote(SellingController):
 	def validate_proj_cust(self):
 		"""check for does customer belong to same project as entered.."""
 		if self.project and self.customer:
-			res = frappe.db.sql(
-				"""select name from `tabProject`
-				where name = %s and (customer = %s or
-					ifnull(customer,'')='')""",
-				(self.project, self.customer),
-			)
+			Project = frappe.qb.DocType("Project")
+			res = (
+				frappe.qb.from_(Project)
+				.select(Project.name)
+				.where(
+					(Project.name == self.project)
+					& (
+						(Project.customer == self.customer)
+						| (Project.customer.isnull())
+						| (Project.customer == "")
+					)
+				)
+			).run()
 			if not res:
 				frappe.throw(
 					_("Customer {0} does not belong to project {1}").format(self.customer, self.project)
