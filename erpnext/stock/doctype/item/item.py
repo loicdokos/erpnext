@@ -1469,20 +1469,16 @@ def get_uom_conv_factor(uom: str | None, stock_uom: str | None):
 	# 			 g -> mg = 1000
 	# 			 g -> kg = 0.001
 	# therefore	 kg -> mg = 1000  / 0.001 = 1,000,000
-	intermediate_match = frappe.db.sql(
-		"""
-			select (first.value / second.value) as value
-			from `tabUOM Conversion Factor` first
-			join `tabUOM Conversion Factor` second
-				on first.from_uom = second.from_uom
-			where
-				first.to_uom = %(to_uom)s
-				and second.to_uom = %(from_uom)s
-			limit 1
-			""",
-		{"to_uom": to_uom, "from_uom": from_uom},
-		as_dict=1,
-	)
+	UOMConvFirst = frappe.qb.DocType("UOM Conversion Factor").as_("first")
+	UOMConvSecond = frappe.qb.DocType("UOM Conversion Factor").as_("second")
+	intermediate_match = (
+		frappe.qb.from_(UOMConvFirst)
+		.join(UOMConvSecond)
+		.on(UOMConvFirst.from_uom == UOMConvSecond.from_uom)
+		.select((UOMConvFirst.value / UOMConvSecond.value).as_("value"))
+		.where((UOMConvFirst.to_uom == to_uom) & (UOMConvSecond.to_uom == from_uom))
+		.limit(1)
+	).run(as_dict=1)
 
 	if intermediate_match:
 		return intermediate_match[0].value
