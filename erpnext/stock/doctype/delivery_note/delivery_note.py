@@ -673,21 +673,27 @@ class DeliveryNote(SellingController):
 			update_pick_list_status(pick_list)
 
 	def check_next_docstatus(self):
-		submit_rv = frappe.db.sql(
-			"""select t1.name
-			from `tabSales Invoice` t1,`tabSales Invoice Item` t2
-			where t1.name = t2.parent and t2.delivery_note = %s and t1.docstatus = 1""",
-			(self.name),
-		)
+		SalesInvoice = frappe.qb.DocType("Sales Invoice")
+		SalesInvoiceItem = frappe.qb.DocType("Sales Invoice Item")
+		submit_rv = (
+			frappe.qb.from_(SalesInvoice)
+			.join(SalesInvoiceItem)
+			.on(SalesInvoice.name == SalesInvoiceItem.parent)
+			.select(SalesInvoice.name)
+			.where((SalesInvoiceItem.delivery_note == self.name) & (SalesInvoice.docstatus == 1))
+		).run()
 		if submit_rv:
 			frappe.throw(_("Sales Invoice {0} has already been submitted").format(submit_rv[0][0]))
 
-		submit_in = frappe.db.sql(
-			"""select t1.name
-			from `tabInstallation Note` t1, `tabInstallation Note Item` t2
-			where t1.name = t2.parent and t2.prevdoc_docname = %s and t1.docstatus = 1""",
-			(self.name),
-		)
+		InstallationNote = frappe.qb.DocType("Installation Note")
+		InstallationNoteItem = frappe.qb.DocType("Installation Note Item")
+		submit_in = (
+			frappe.qb.from_(InstallationNote)
+			.join(InstallationNoteItem)
+			.on(InstallationNote.name == InstallationNoteItem.parent)
+			.select(InstallationNote.name)
+			.where((InstallationNoteItem.prevdoc_docname == self.name) & (InstallationNote.docstatus == 1))
+		).run()
 		if submit_in:
 			frappe.throw(_("Installation Note {0} has already been submitted").format(submit_in[0][0]))
 
