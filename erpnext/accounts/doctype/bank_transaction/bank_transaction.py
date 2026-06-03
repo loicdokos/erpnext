@@ -477,30 +477,34 @@ def get_clearance_details(transaction, payment_entry, bt_allocations, gl_entries
 
 def get_related_bank_gl_entries(docs):
 	# nosemgrep: frappe-semgrep-rules.rules.frappe-using-db-sql
+	from frappe.query_builder.functions import Abs, Sum
+	from pypika import Tuple
+
 	if not docs:
 		return {}
 
-	result = frappe.db.sql(
-		"""
-        SELECT
-            gle.voucher_type AS doctype,
-            gle.voucher_no AS docname,
-            gle.account AS gl_account,
-            SUM(ABS(gle.credit_in_account_currency - gle.debit_in_account_currency)) AS amount
-        FROM
-            `tabGL Entry` gle
-        LEFT JOIN
-            `tabAccount` ac ON ac.name = gle.account
-        WHERE
-            ac.account_type = 'Bank'
-            AND (gle.voucher_type, gle.voucher_no) IN %(docs)s
-            AND gle.is_cancelled = 0
-        GROUP BY
-            gle.voucher_type, gle.voucher_no, gle.account
-        """,
-		{"docs": docs},
-		as_dict=True,
+	GLEntry = frappe.qb.DocType("GL Entry")
+	Account = frappe.qb.DocType("Account")
+
+	multi_columns_condition = Tuple(GLEntry.voucher_type, GLEntry.voucher_no)
+
+	query = (
+		frappe.qb.from_(GLEntry)
+		.left_join(Account)
+		.on(Account.name == GLEntry.account)
+		.select(
+			GLEntry.voucher_type.as_("doctype"),
+			GLEntry.voucher_no.as_("docname"),
+			GLEntry.account.as_("gl_account"),
+			Sum(Abs(GLEntry.credit_in_account_currency - GLEntry.debit_in_account_currency)).as_("amount"),
+		)
+		.where(Account.account_type == "Bank")
+		.where(multi_columns_condition.isin(docs))
+		.where(GLEntry.is_cancelled == 0)
+		.groupby(GLEntry.voucher_type, GLEntry.voucher_no, GLEntry.account)
 	)
+
+	result = query.run(as_dict=True)
 
 	entries = {}
 	for row in result:
