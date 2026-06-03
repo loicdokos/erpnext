@@ -292,14 +292,19 @@ class Opportunity(TransactionBase, CRMNote):
 				"name",
 			)
 		else:
-			return frappe.db.sql(
-				"""
-				select q.name
-				from `tabQuotation` q, `tabQuotation Item` qi
-				where q.name = qi.parent and q.docstatus=1 and qi.prevdoc_docname =%s
-				and q.status not in ('Lost', 'Closed')""",
-				self.name,
-			)
+			Quotation = DocType("Quotation")
+			QuotationItem = DocType("Quotation Item")
+			return (
+				frappe.qb.from_(Quotation)
+				.join(QuotationItem)
+				.on(Quotation.name == QuotationItem.parent)
+				.select(Quotation.name)
+				.where(
+					(Quotation.docstatus == 1)
+					& (QuotationItem.prevdoc_docname == self.name)
+					& (Quotation.status.notin(["Lost", "Closed"]))
+				)
+			).run()
 
 	def has_ordered_quotation(self):
 		if not self.get("items", []):
