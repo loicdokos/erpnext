@@ -1223,10 +1223,16 @@ class PurchaseInvoice(BuyingController):
 			):
 				# Post reverse entry for Stock-Received-But-Not-Billed if it is booked in Purchase Receipt
 				if item.purchase_receipt and valuation_tax_accounts:
-					negative_expense_booked_in_pr = frappe.db.sql(
-						"""select name from `tabGL Entry`
-							where voucher_type='Purchase Receipt' and voucher_no=%s and account in %s""",
-						(item.purchase_receipt, valuation_tax_accounts),
+					gle = qb.DocType("GL Entry")
+					negative_expense_booked_in_pr = (
+						qb.from_(gle)
+						.select(gle.name)
+						.where(
+							(gle.voucher_type == "Purchase Receipt")
+							& (gle.voucher_no == item.purchase_receipt)
+							& (gle.account.isin(valuation_tax_accounts))
+						)
+						.run()
 					)
 
 					(
