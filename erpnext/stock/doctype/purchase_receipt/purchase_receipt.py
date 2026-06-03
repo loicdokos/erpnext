@@ -465,12 +465,15 @@ class PurchaseReceipt(BuyingController):
 
 		self.check_on_hold_or_closed_status()
 		# Check if Purchase Invoice has been submitted against current Purchase Order
-		submitted = frappe.db.sql(
-			"""select t1.name
-			from `tabPurchase Invoice` t1,`tabPurchase Invoice Item` t2
-			where t1.name = t2.parent and t2.purchase_receipt = %s and t1.docstatus = 1""",
-			self.name,
-		)
+		PurchaseInvoice = frappe.qb.DocType("Purchase Invoice")
+		PurchaseInvoiceItem = frappe.qb.DocType("Purchase Invoice Item")
+		submitted = (
+			frappe.qb.from_(PurchaseInvoice)
+			.join(PurchaseInvoiceItem)
+			.on(PurchaseInvoice.name == PurchaseInvoiceItem.parent)
+			.select(PurchaseInvoice.name)
+			.where((PurchaseInvoiceItem.purchase_receipt == self.name) & (PurchaseInvoice.docstatus == 1))
+		).run()
 		if submitted:
 			frappe.throw(_("Purchase Invoice {0} is already submitted").format(submitted[0][0]))
 
