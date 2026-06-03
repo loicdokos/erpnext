@@ -1604,11 +1604,15 @@ def get_invoiced_qty_map(purchase_receipt):
 	"""returns a map: {pr_detail: invoiced_qty}"""
 	invoiced_qty_map = {}
 
-	for pr_detail, qty in frappe.db.sql(
-		"""select pr_detail, qty from `tabPurchase Invoice Item`
-		where purchase_receipt=%s and docstatus=1""",
-		purchase_receipt,
-	):
+	PurchaseInvoiceItem = frappe.qb.DocType("Purchase Invoice Item")
+	rows = (
+		frappe.qb.from_(PurchaseInvoiceItem)
+		.select(PurchaseInvoiceItem.pr_detail, PurchaseInvoiceItem.qty)
+		.where(
+			(PurchaseInvoiceItem.purchase_receipt == purchase_receipt) & (PurchaseInvoiceItem.docstatus == 1)
+		)
+	).run()
+	for pr_detail, qty in rows:
 		if not invoiced_qty_map.get(pr_detail):
 			invoiced_qty_map[pr_detail] = 0
 		invoiced_qty_map[pr_detail] += qty
