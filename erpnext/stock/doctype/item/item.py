@@ -634,8 +634,10 @@ class Item(Document):
 		).run()
 
 	def on_trash(self):
-		frappe.db.sql("""delete from tabBin where item_code=%s""", self.name)
-		frappe.db.sql("delete from `tabItem Price` where item_code=%s", self.name)
+		Bin = frappe.qb.DocType("Bin")
+		frappe.qb.from_(Bin).delete().where(Bin.item_code == self.name).run()
+		ItemPrice = frappe.qb.DocType("Item Price")
+		frappe.qb.from_(ItemPrice).delete().where(ItemPrice.item_code == self.name).run()
 		for variant_of in frappe.get_all("Item", filters={"variant_of": self.name}):
 			frappe.delete_doc("Item", variant_of.name)
 
