@@ -448,14 +448,17 @@ class PurchaseReceipt(BuyingController):
 					)
 
 	def check_next_docstatus(self):
-		submit_rv = frappe.db.sql(
-			"""select t1.name
-			from `tabPurchase Invoice` t1,`tabPurchase Invoice Item` t2
-			where t1.name = t2.parent and t2.purchase_receipt = %s and t1.docstatus = 1""",
-			(self.name),
-		)
+		PurchaseInvoice = frappe.qb.DocType("Purchase Invoice")
+		PurchaseInvoiceItem = frappe.qb.DocType("Purchase Invoice Item")
+		submit_rv = (
+			frappe.qb.from_(PurchaseInvoice)
+			.join(PurchaseInvoiceItem)
+			.on(PurchaseInvoice.name == PurchaseInvoiceItem.parent)
+			.select(PurchaseInvoice.name)
+			.where((PurchaseInvoiceItem.purchase_receipt == self.name) & (PurchaseInvoice.docstatus == 1))
+		).run()
 		if submit_rv:
-			frappe.throw(_("Purchase Invoice {0} is already submitted").format(self.submit_rv[0][0]))
+			frappe.throw(_("Purchase Invoice {0} is already submitted").format(submit_rv[0][0]))
 
 	def on_cancel(self):
 		super().on_cancel()
