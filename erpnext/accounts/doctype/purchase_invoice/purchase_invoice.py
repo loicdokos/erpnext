@@ -668,15 +668,22 @@ class PurchaseInvoice(BuyingController):
 	def check_prev_docstatus(self):
 		for d in self.get("items"):
 			if d.purchase_order:
-				submitted = frappe.db.sql(
-					"select name from `tabPurchase Order` where docstatus = 1 and name = %s", d.purchase_order
+				po = qb.DocType("Purchase Order")
+				submitted = (
+					qb.from_(po)
+					.select(po.name)
+					.where((po.docstatus == 1) & (po.name == d.purchase_order))
+					.run()
 				)
 				if not submitted:
 					frappe.throw(_("Purchase Order {0} is not submitted").format(d.purchase_order))
 			if d.purchase_receipt:
-				submitted = frappe.db.sql(
-					"select name from `tabPurchase Receipt` where docstatus = 1 and name = %s",
-					d.purchase_receipt,
+				pr = qb.DocType("Purchase Receipt")
+				submitted = (
+					qb.from_(pr)
+					.select(pr.name)
+					.where((pr.docstatus == 1) & (pr.name == d.purchase_receipt))
+					.run()
 				)
 				if not submitted:
 					frappe.throw(_("Purchase Receipt {0} is not submitted").format(d.purchase_receipt))
