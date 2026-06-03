@@ -6,6 +6,7 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 from frappe.utils import nowdate
+from pypika import Criterion
 
 from erpnext.accounts.party import get_party_account
 
@@ -77,13 +78,23 @@ def get_mop_query(doctype: str, txt: str, searchfield: str, start: int, page_len
 @frappe.whitelist()
 @frappe.validate_and_sanitize_search_inputs
 def get_supplier_query(doctype: str, txt: str, searchfield: str, start: int, page_len: int, filters: dict):
-	return frappe.db.sql(
-		""" select supplier from `tabPayment Order Reference`
-		where parent = %(parent)s and supplier like %(txt)s and
-		(payment_reference is null or payment_reference='')
-		limit %(page_len)s offset %(start)s""",
-		{"parent": filters.get("parent"), "start": start, "page_len": page_len, "txt": "%%%s%%" % txt},
+	PaymentOrderReference = frappe.qb.DocType("Payment Order Reference")
+
+	null_or_empty_reference = Criterion.any(
+		[PaymentOrderReference.payment_reference.isnull(), PaymentOrderReference.payment_reference == ""]
 	)
+
+	query = (
+		frappe.qb.from_(PaymentOrderReference)
+		.select(PaymentOrderReference.supplier)
+		.where(PaymentOrderReference.parent == filters.get("parent"))
+		.where(PaymentOrderReference.supplier.like(f"%{txt}%"))
+		.where(null_or_empty_reference)
+		.limit(page_len)
+		.offset(start)
+	)
+
+	return query.run()
 
 
 @frappe.whitelist()
