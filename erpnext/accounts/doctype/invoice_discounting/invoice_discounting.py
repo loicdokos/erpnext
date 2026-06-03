@@ -360,21 +360,30 @@ def get_invoices(filters: str):
 
 def get_party_account_based_on_invoice_discounting(sales_invoice):
 	party_account = None
-	invoice_discounting = frappe.db.sql(
-		"""
-		select par.accounts_receivable_discounted, par.accounts_receivable_unpaid, par.status
-		from `tabInvoice Discounting` par, `tabDiscounted Invoice` ch
-		where par.name=ch.parent
-			and par.docstatus=1
-			and ch.sales_invoice = %s
-	""",
-		(sales_invoice),
-		as_dict=1,
+
+	InvoiceDiscounting = frappe.qb.DocType("Invoice Discounting")
+	DiscountedInvoice = frappe.qb.DocType("Discounted Invoice")
+
+	query = (
+		frappe.qb.from_(InvoiceDiscounting)
+		.join(DiscountedInvoice)
+		.on(DiscountedInvoice.parent == InvoiceDiscounting.name)
+		.select(
+			InvoiceDiscounting.accounts_receivable_discounted,
+			InvoiceDiscounting.accounts_receivable_unpaid,
+			InvoiceDiscounting.status,
+		)
+		.where(InvoiceDiscounting.docstatus == 1)
+		.where(DiscountedInvoice.sales_invoice == sales_invoice)
 	)
+
+	invoice_discounting = query.run(as_dict=1)
+
 	if invoice_discounting:
-		if invoice_discounting[0].status == "Disbursed":
-			party_account = invoice_discounting[0].accounts_receivable_discounted
-		elif invoice_discounting[0].status == "Settled":
-			party_account = invoice_discounting[0].accounts_receivable_unpaid
+		record = invoice_discounting[0]
+		if record.status == "Disbursed":
+			party_account = record.accounts_receivable_discounted
+		elif record.status == "Settled":
+			party_account = record.accounts_receivable_unpaid
 
 	return party_account
