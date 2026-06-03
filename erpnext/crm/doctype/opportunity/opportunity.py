@@ -384,12 +384,12 @@ class Opportunity(TransactionBase, CRMNote):
 
 @frappe.whitelist()
 def get_item_details(item_code: str):
-	item = frappe.db.sql(
-		"""select item_name, stock_uom, image, description, item_group, brand
-		from `tabItem` where name = %s""",
-		item_code,
-		as_dict=1,
-	)
+	Item = DocType("Item")
+	item = (
+		frappe.qb.from_(Item)
+		.select(Item.item_name, Item.stock_uom, Item.image, Item.description, Item.item_group, Item.brand)
+		.where(Item.name == item_code)
+	).run(as_dict=1)
 	return {
 		"item_name": item and item[0]["item_name"] or "",
 		"uom": item and item[0]["stock_uom"] or "",
