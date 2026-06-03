@@ -1297,24 +1297,41 @@ class JournalEntry(AccountsController):
 		self.validate_total_debit_and_credit()
 
 	def get_values(self):
-		cond = f" and outstanding_amount <= {self.write_off_amount}" if flt(self.write_off_amount) > 0 else ""
-
 		if self.write_off_based_on == "Accounts Receivable":
-			return frappe.db.sql(
-				"""select name, debit_to as account, customer as party, outstanding_amount
-				from `tabSales Invoice` where docstatus = 1 and company = {}
-				and outstanding_amount > 0 {}""".format("%s", cond),
-				self.company,
-				as_dict=True,
+			SI = frappe.qb.DocType("Sales Invoice")
+			query = (
+				frappe.qb.from_(SI)
+				.select(
+					SI.name,
+					SI.debit_to.as_("account"),
+					SI.customer.as_("party"),
+					SI.outstanding_amount,
+				)
+				.where(SI.docstatus == 1)
+				.where(SI.company == self.company)
+				.where(SI.outstanding_amount > 0)
 			)
+			if flt(self.write_off_amount) > 0:
+				query = query.where(SI.outstanding_amount <= self.write_off_amount)
+			return query.run(as_dict=True)
+
 		elif self.write_off_based_on == "Accounts Payable":
-			return frappe.db.sql(
-				"""select name, credit_to as account, supplier as party, outstanding_amount
-				from `tabPurchase Invoice` where docstatus = 1 and company = {}
-				and outstanding_amount > 0 {}""".format("%s", cond),
-				self.company,
-				as_dict=True,
+			PI = frappe.qb.DocType("Purchase Invoice")
+			query = (
+				frappe.qb.from_(PI)
+				.select(
+					PI.name,
+					PI.credit_to.as_("account"),
+					PI.supplier.as_("party"),
+					PI.outstanding_amount,
+				)
+				.where(PI.docstatus == 1)
+				.where(PI.company == self.company)
+				.where(PI.outstanding_amount > 0)
 			)
+			if flt(self.write_off_amount) > 0:
+				query = query.where(PI.outstanding_amount <= self.write_off_amount)
+			return query.run(as_dict=True)
 
 	def validate_credit_debit_note(self):
 		if self.stock_entry:
