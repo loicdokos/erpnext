@@ -711,52 +711,74 @@ def get_actions(params, budget):
 
 
 def get_requested_amount(params):
-	item_code = params.get("item_code")
-	condition = get_other_condition(params, "Material Request")
+	from frappe.query_builder.functions import IfNull
 
-	data = frappe.db.sql(
-		""" select ifnull((sum(child.stock_qty - child.ordered_qty) * rate), 0) as amount
-		from `tabMaterial Request Item` child, `tabMaterial Request` parent where parent.name = child.parent and
-		child.item_code = %s and parent.docstatus = 1 and child.stock_qty > child.ordered_qty and {} and
-		parent.material_request_type = 'Purchase' and parent.status != 'Stopped'""".format(condition),
-		item_code,
-		as_list=1,
+	item_code = params.get("item_code")
+
+	MRItem = frappe.qb.DocType("Material Request Item")
+	MR = frappe.qb.DocType("Material Request")
+
+	start_date = frappe.get_cached_value("Fiscal Year", params.from_fiscal_year, "year_start_date")
+	end_date = frappe.get_cached_value("Fiscal Year", params.to_fiscal_year, "year_end_date")
+
+	query = (
+		frappe.qb.from_(MRItem)
+		.join(MR)
+		.on(MRItem.parent == MR.name)
+		.select(IfNull((Sum(MRItem.stock_qty - MRItem.ordered_qty) * MRItem.rate), 0).as_("amount"))
+		.where(MRItem.item_code == item_code)
+		.where(MR.docstatus == 1)
+		.where(MRItem.stock_qty > MRItem.ordered_qty)
+		.where(MR.material_request_type == "Purchase")
+		.where(MR.status != "Stopped")
+		.where(MRItem.expense_account == params.expense_account)
+		.where(MR.schedule_date.between(start_date, end_date))
 	)
+
+	if params.get("budget_against_field") and params.get(params.get("budget_against_field")):
+		query = query.where(
+			getattr(MRItem, params.get("budget_against_field"))
+			== params.get(params.get("budget_against_field"))
+		)
+
+	data = query.run(as_list=True)
 
 	return data[0][0] if data else 0
 
 
 def get_ordered_amount(params):
+	from frappe.query_builder.functions import IfNull
+
 	item_code = params.get("item_code")
-	condition = get_other_condition(params, "Purchase Order")
 
-	data = frappe.db.sql(
-		f""" select ifnull(sum(child.amount - child.billed_amt), 0) as amount
-		from `tabPurchase Order Item` child, `tabPurchase Order` parent where
-		parent.name = child.parent and child.item_code = %s and parent.docstatus = 1 and child.amount > child.billed_amt
-		and parent.status != 'Closed' and {condition}""",
-		item_code,
-		as_list=1,
-	)
-
-	return data[0][0] if data else 0
-
-
-def get_other_condition(params, for_doc):
-	condition = f"expense_account = '{params.expense_account}'"
-	budget_against_field = params.get("budget_against_field")
-
-	if budget_against_field and params.get(budget_against_field):
-		condition += f" and child.{budget_against_field} = '{params.get(budget_against_field)}'"
-
-	date_field = "schedule_date" if for_doc == "Material Request" else "transaction_date"
+	POItem = frappe.qb.DocType("Purchase Order Item")
+	PO = frappe.qb.DocType("Purchase Order")
 
 	start_date = frappe.get_cached_value("Fiscal Year", params.from_fiscal_year, "year_start_date")
 	end_date = frappe.get_cached_value("Fiscal Year", params.to_fiscal_year, "year_end_date")
 
-	condition += f" and parent.{date_field} between '{start_date}' and '{end_date}'"
+	query = (
+		frappe.qb.from_(POItem)
+		.join(PO)
+		.on(POItem.parent == PO.name)
+		.select(IfNull(Sum(POItem.amount - POItem.billed_amt), 0).as_("amount"))
+		.where(POItem.item_code == item_code)
+		.where(PO.docstatus == 1)
+		.where(POItem.amount > POItem.billed_amt)
+		.where(PO.status != "Closed")
+		.where(POItem.expense_account == params.expense_account)
+		.where(PO.transaction_date.between(start_date, end_date))
+	)
 
-	return condition
+	if params.get("budget_against_field") and params.get(params.get("budget_against_field")):
+		query = query.where(
+			getattr(POItem, params.get("budget_against_field"))
+			== params.get(params.get("budget_against_field"))
+		)
+
+	data = query.run(as_list=True)
+
+	return data[0][0] if data else 0
 
 
 def get_actual_expense(params):
