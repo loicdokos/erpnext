@@ -312,14 +312,19 @@ class Opportunity(TransactionBase, CRMNote):
 				"Quotation", {"opportunity": self.name, "status": "Ordered", "docstatus": 1}, "name"
 			)
 		else:
-			return frappe.db.sql(
-				"""
-				select q.name
-				from `tabQuotation` q, `tabQuotation Item` qi
-				where q.name = qi.parent and q.docstatus=1 and qi.prevdoc_docname =%s
-				and q.status = 'Ordered'""",
-				self.name,
-			)
+			Quotation = DocType("Quotation")
+			QuotationItem = DocType("Quotation Item")
+			return (
+				frappe.qb.from_(Quotation)
+				.join(QuotationItem)
+				.on(Quotation.name == QuotationItem.parent)
+				.select(Quotation.name)
+				.where(
+					(Quotation.docstatus == 1)
+					& (QuotationItem.prevdoc_docname == self.name)
+					& (Quotation.status == "Ordered")
+				)
+			).run()
 
 	def has_lost_quotation(self):
 		lost_quotation = frappe.db.sql(
