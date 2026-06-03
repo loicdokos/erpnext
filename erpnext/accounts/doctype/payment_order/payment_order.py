@@ -60,12 +60,18 @@ class PaymentOrder(Document):
 @frappe.whitelist()
 @frappe.validate_and_sanitize_search_inputs
 def get_mop_query(doctype: str, txt: str, searchfield: str, start: int, page_len: int, filters: dict):
-	return frappe.db.sql(
-		""" select mode_of_payment from `tabPayment Order Reference`
-		where parent = %(parent)s and mode_of_payment like %(txt)s
-		limit %(page_len)s offset %(start)s""",
-		{"parent": filters.get("parent"), "start": start, "page_len": page_len, "txt": "%%%s%%" % txt},
+	PaymentOrderReference = frappe.qb.DocType("Payment Order Reference")
+
+	query = (
+		frappe.qb.from_(PaymentOrderReference)
+		.select(PaymentOrderReference.mode_of_payment)
+		.where(PaymentOrderReference.parent == filters.get("parent"))
+		.where(PaymentOrderReference.mode_of_payment.like(f"%{txt}%"))
+		.limit(page_len)
+		.offset(start)
 	)
+
+	return query.run()
 
 
 @frappe.whitelist()
