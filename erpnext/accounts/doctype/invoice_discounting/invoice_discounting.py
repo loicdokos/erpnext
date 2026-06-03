@@ -319,42 +319,43 @@ class InvoiceDiscounting(AccountsController):
 @frappe.whitelist()
 def get_invoices(filters: str):
 	filters = frappe._dict(json.loads(filters))
-	cond = []
-	if filters.customer:
-		cond.append("customer=%(customer)s")
-	if filters.from_date:
-		cond.append("posting_date >= %(from_date)s")
-	if filters.to_date:
-		cond.append("posting_date <= %(to_date)s")
-	if filters.min_amount:
-		cond.append("base_grand_total >= %(min_amount)s")
-	if filters.max_amount:
-		cond.append("base_grand_total <= %(max_amount)s")
 
-	where_condition = ""
-	if cond:
-		where_condition += " and " + " and ".join(cond)
+	SalesInvoice = frappe.qb.DocType("Sales Invoice")
+	DiscountedInvoice = frappe.qb.DocType("Discounted Invoice")
 
-	return frappe.db.sql(
-		"""
-		select
-			name as sales_invoice,
-			customer,
-			posting_date,
-			outstanding_amount,
-			debit_to
-		from `tabSales Invoice` si
-		where
-			docstatus = 1
-			and outstanding_amount > 0
-			%s
-			and not exists(select di.name from `tabDiscounted Invoice` di
-				where di.docstatus=1 and di.sales_invoice=si.name)
-	"""
-		% where_condition,
-		filters,
-		as_dict=1,
+	subquery = (
+		frappe.qb.from_(DiscountedInvoice)
+		.select(DiscountedInvoice.name)
+		.where(DiscountedInvoice.docstatus == 1)
+		.where(DiscountedInvoice.sales_invoice == SalesInvoice.name)
 	)
+
+	query = (
+		frappe.qb.from_(SalesInvoice)
+		.select(
+			SalesInvoice.name.as_("sales_invoice"),
+			SalesInvoice.customer,
+			SalesInvoice.posting_date,
+			SalesInvoice.outstanding_amount,
+			SalesInvoice.debit_to,
+		)
+		.where(SalesInvoice.docstatus == 1)
+		.where(SalesInvoice.outstanding_amount > 0)
+		.where(~subquery.exists())
+	)
+
+	if filters.customer:
+		query = query.where(SalesInvoice.customer == filters.customer)
+	if filters.from_date:
+		query = query.where(SalesInvoice.posting_date >= filters.from_date)
+	if filters.to_date:
+		query = query.where(SalesInvoice.posting_date <= filters.to_date)
+	if filters.min_amount:
+		query = query.where(SalesInvoice.base_grand_total >= filters.min_amount)
+	if filters.max_amount:
+		query = query.where(SalesInvoice.base_grand_total <= filters.max_amount)
+
+	return query.run(as_dict=1)
 
 
 def get_party_account_based_on_invoice_discounting(sales_invoice):
