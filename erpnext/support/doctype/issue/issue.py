@@ -263,7 +263,8 @@ def has_website_permission(doc, ptype, user, verbose=False):
 
 def update_issue(contact, method):
 	"""Called when Contact is deleted"""
-	frappe.db.sql("""UPDATE `tabIssue` set contact='' where contact=%s""", contact.name)
+	Issue = frappe.qb.DocType("Issue")
+	frappe.qb.update(Issue).set(Issue.contact, "").where(Issue.contact == contact.name).run()
 
 
 @frappe.whitelist()
