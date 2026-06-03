@@ -348,45 +348,46 @@ def validate_balance_type(account, adv_adj=False):
 def update_outstanding_amt(
 	account, party_type, party, against_voucher_type, against_voucher, on_cancel=False
 ):
+	from pypika.functions import Sum
+
+	GLE = frappe.qb.DocType("GL Entry")
+
+	# get final outstanding amt
+	bal_query = (
+		frappe.qb.from_(GLE)
+		.select(Sum(GLE.debit_in_account_currency) - Sum(GLE.credit_in_account_currency))
+		.where(GLE.against_voucher_type == against_voucher_type)
+		.where(GLE.against_voucher == against_voucher)
+		.where(GLE.voucher_type != "Invoice Discounting")
+	)
+
 	if party_type and party:
-		party_condition = " and party_type={} and party={}".format(
-			frappe.db.escape(party_type), frappe.db.escape(party)
-		)
-	else:
-		party_condition = ""
+		bal_query = bal_query.where(GLE.party_type == party_type).where(GLE.party == party)
 
 	if against_voucher_type == "Sales Invoice":
 		party_account = frappe.get_cached_value(against_voucher_type, against_voucher, "debit_to")
-		account_condition = f"and account in ({frappe.db.escape(account)}, {frappe.db.escape(party_account)})"
+		bal_query = bal_query.where(GLE.account.isin([account, party_account]))
 	else:
-		account_condition = f" and account = {frappe.db.escape(account)}"
+		bal_query = bal_query.where(GLE.account == account)
 
-	# get final outstanding amt
-	bal = flt(
-		frappe.db.sql(
-			f"""
-		select sum(debit_in_account_currency) - sum(credit_in_account_currency)
-		from `tabGL Entry`
-		where against_voucher_type=%s and against_voucher=%s
-		and voucher_type != 'Invoice Discounting'
-		{party_condition} {account_condition}""",
-			(against_voucher_type, against_voucher),
-		)[0][0]
-		or 0.0
-	)
+	bal = flt(bal_query.run()[0][0] or 0.0)
 
 	if against_voucher_type == "Purchase Invoice":
 		bal = -bal
 	elif against_voucher_type == "Journal Entry":
-		against_voucher_amount = flt(
-			frappe.db.sql(
-				f"""
-			select sum(debit_in_account_currency) - sum(credit_in_account_currency)
-			from `tabGL Entry` where voucher_type = 'Journal Entry' and voucher_no = %s
-			and account = %s and (against_voucher is null or against_voucher='') {party_condition}""",
-				(against_voucher, account),
-			)[0][0]
+		je_query = (
+			frappe.qb.from_(GLE)
+			.select(Sum(GLE.debit_in_account_currency) - Sum(GLE.credit_in_account_currency))
+			.where(GLE.voucher_type == "Journal Entry")
+			.where(GLE.voucher_no == against_voucher)
+			.where(GLE.account == account)
+			.where(GLE.against_voucher.isnull() | (GLE.against_voucher == ""))
 		)
+
+		if party_type and party:
+			je_query = je_query.where(GLE.party_type == party_type).where(GLE.party == party)
+
+		against_voucher_amount = flt(je_query.run()[0][0])
 
 		if not against_voucher_amount:
 			frappe.throw(
