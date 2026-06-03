@@ -1692,16 +1692,37 @@ def get_used_alternative_items(
 		return {}
 
 	used_alternative_items = {}
-	data = frappe.db.sql(
-		f""" select sted.original_item, sted.uom, sted.conversion_factor,
-			sted.item_code, sted.item_name, sted.conversion_factor,sted.stock_uom, sted.description
-		from
-			`tabStock Entry` ste, `tabStock Entry Detail` sted
-		where
-			sted.parent = ste.name and ste.docstatus = 1 and sted.original_item !=  sted.item_code
-			{cond} """,
-		as_dict=1,
+	StockEntry = DocType("Stock Entry")
+	StockEntryDetail = DocType("Stock Entry Detail")
+
+	query = (
+		frappe.qb.from_(StockEntry)
+		.join(StockEntryDetail)
+		.on(StockEntryDetail.parent == StockEntry.name)
+		.select(
+			StockEntryDetail.original_item,
+			StockEntryDetail.uom,
+			StockEntryDetail.conversion_factor,
+			StockEntryDetail.item_code,
+			StockEntryDetail.item_name,
+			StockEntryDetail.stock_uom,
+			StockEntryDetail.description,
+		)
+		.where((StockEntry.docstatus == 1) & (StockEntryDetail.original_item != StockEntryDetail.item_code))
 	)
+
+	if subcontract_order:
+		query = query.where(
+			(StockEntry.purpose == "Send to Subcontractor")
+			& (StockEntry[subcontract_order_field] == subcontract_order)
+		)
+	elif work_order:
+		query = query.where(
+			(StockEntry.purpose == "Material Transfer for Manufacture")
+			& (StockEntry.work_order == work_order)
+		)
+
+	data = query.run(as_dict=1)
 
 	for d in data:
 		used_alternative_items[d.original_item] = d
