@@ -86,13 +86,34 @@ class ItemAlternative(Document):
 @frappe.whitelist()
 @frappe.validate_and_sanitize_search_inputs
 def get_alternative_items(doctype: Any, txt: str, searchfield: Any, start: int, page_len: int, filters: dict):
-	return frappe.db.sql(
-		f""" (select alternative_item_code from `tabItem Alternative`
-			where item_code = %(item_code)s and alternative_item_code like %(txt)s)
-		union
-			(select item_code from `tabItem Alternative`
-			where alternative_item_code = %(item_code)s and item_code like %(txt)s
-			and two_way = 1) limit {page_len} offset {start}
-		""",
-		{"item_code": filters.get("item_code"), "txt": "%" + txt + "%"},
-	)
+	ItemAlternative = frappe.qb.DocType("Item Alternative")
+	item_code = filters.get("item_code")
+	txt_pattern = "%" + txt + "%"
+
+	rows1 = (
+		frappe.qb.from_(ItemAlternative)
+		.select(ItemAlternative.alternative_item_code)
+		.where(
+			(ItemAlternative.item_code == item_code)
+			& (ItemAlternative.alternative_item_code.like(txt_pattern))
+		)
+	).run()
+
+	rows2 = (
+		frappe.qb.from_(ItemAlternative)
+		.select(ItemAlternative.item_code)
+		.where(
+			(ItemAlternative.alternative_item_code == item_code)
+			& (ItemAlternative.item_code.like(txt_pattern))
+			& (ItemAlternative.two_way == 1)
+		)
+	).run()
+
+	seen = set()
+	combined = []
+	for row in rows1 + rows2:
+		if row[0] not in seen:
+			seen.add(row[0])
+			combined.append(row)
+
+	return combined[start : start + page_len]
