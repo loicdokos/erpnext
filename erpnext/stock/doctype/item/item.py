@@ -624,22 +624,14 @@ class Item(Document):
 		if self.is_new():
 			return
 
-		frappe.db.sql(
-			"""
-				UPDATE `tabItem Price`
-				SET
-					item_name=%(item_name)s,
-					item_description=%(item_description)s,
-					brand=%(brand)s
-				WHERE item_code=%(item_code)s
-			""",
-			dict(
-				item_name=self.item_name,
-				item_description=self.description,
-				brand=self.brand,
-				item_code=self.name,
-			),
-		)
+		ItemPrice = frappe.qb.DocType("Item Price")
+		(
+			frappe.qb.update(ItemPrice)
+			.set(ItemPrice.item_name, self.item_name)
+			.set(ItemPrice.item_description, self.description)
+			.set(ItemPrice.brand, self.brand)
+			.where(ItemPrice.item_code == self.name)
+		).run()
 
 	def on_trash(self):
 		frappe.db.sql("""delete from tabBin where item_code=%s""", self.name)
