@@ -89,13 +89,19 @@ def make_maintenance_visit(source_name: str, target_doc: str | Document | None =
 		target_doc.prevdoc_doctype = source_parent.doctype
 		target_doc.prevdoc_docname = source_parent.name
 
-	visit = frappe.db.sql(
-		"""select t1.name
-		from `tabMaintenance Visit` t1, `tabMaintenance Visit Purpose` t2
-		where t2.parent=t1.name and t2.prevdoc_docname=%s
-		and t1.docstatus=1 and t1.completion_status='Fully Completed'""",
-		source_name,
-	)
+	MaintenanceVisit = frappe.qb.DocType("Maintenance Visit")
+	MaintenanceVisitPurpose = frappe.qb.DocType("Maintenance Visit Purpose")
+	visit = (
+		frappe.qb.from_(MaintenanceVisit)
+		.join(MaintenanceVisitPurpose)
+		.on(MaintenanceVisitPurpose.parent == MaintenanceVisit.name)
+		.select(MaintenanceVisit.name)
+		.where(
+			(MaintenanceVisitPurpose.prevdoc_docname == source_name)
+			& (MaintenanceVisit.docstatus == 1)
+			& (MaintenanceVisit.completion_status == "Fully Completed")
+		)
+	).run()
 
 	if not visit:
 		target_doc = get_mapped_doc(
