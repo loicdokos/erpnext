@@ -340,20 +340,19 @@ def get_default_contact(out, name):
 
 
 def get_default_address(out, name):
-	shipping_addresses = frappe.db.sql(
-		"""
-			SELECT parent,
-				(SELECT is_shipping_address FROM tabAddress a WHERE a.name=dl.parent) AS is_shipping_address
-			FROM
-				`tabDynamic Link` dl
-			WHERE
-				dl.link_doctype='Customer'
-				AND dl.link_name=%s
-				AND dl.parenttype = 'Address'
-		""",
-		(name),
-		as_dict=1,
-	)
+	DynamicLink = frappe.qb.DocType("Dynamic Link")
+	Address = frappe.qb.DocType("Address")
+	shipping_addresses = (
+		frappe.qb.from_(DynamicLink)
+		.join(Address)
+		.on(Address.name == DynamicLink.parent)
+		.select(DynamicLink.parent, Address.is_shipping_address)
+		.where(
+			(DynamicLink.link_doctype == "Customer")
+			& (DynamicLink.link_name == name)
+			& (DynamicLink.parenttype == "Address")
+		)
+	).run(as_dict=1)
 
 	if shipping_addresses:
 		for out.shipping_address in shipping_addresses:
