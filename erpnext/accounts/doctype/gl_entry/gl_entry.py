@@ -480,10 +480,14 @@ def rename_temporarily_named_docs(doctype):
 			oldname = doc.name
 			set_name_from_naming_options(autoname, doc)
 			newname = doc.name
-			frappe.db.sql(
-				f"UPDATE `tab{doctype}` SET name = %s, to_rename = 0, modified = %s where name = %s",
-				(newname, now(), oldname),
-			)
+			DT = frappe.qb.DocType(doctype)
+			(
+				frappe.qb.update(DT)
+				.set(DT.name, newname)
+				.set(DT.to_rename, 0)
+				.set(DT.modified, now())
+				.where(DT.name == oldname)
+			).run()
 
 			for hook_type in ("on_gle_rename", "on_sle_rename"):
 				for hook in frappe.get_hooks(hook_type):
