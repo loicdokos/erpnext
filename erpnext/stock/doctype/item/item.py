@@ -758,32 +758,26 @@ class Item(Document):
 			return
 
 		if self.db_get("description") != self.description:
-			frappe.db.sql(
-				"""
-				update `tabBOM`
-				set description = %s
-				where item = %s and docstatus < 2
-			""",
-				(self.description, self.name),
-			)
+			BOM = frappe.qb.DocType("BOM")
+			(
+				frappe.qb.update(BOM)
+				.set(BOM.description, self.description)
+				.where((BOM.item == self.name) & (BOM.docstatus < 2))
+			).run()
 
-			frappe.db.sql(
-				"""
-				update `tabBOM Item`
-				set description = %s
-				where item_code = %s and docstatus < 2
-			""",
-				(self.description, self.name),
-			)
+			BOMItem = frappe.qb.DocType("BOM Item")
+			(
+				frappe.qb.update(BOMItem)
+				.set(BOMItem.description, self.description)
+				.where((BOMItem.item_code == self.name) & (BOMItem.docstatus < 2))
+			).run()
 
-			frappe.db.sql(
-				"""
-				update `tabBOM Explosion Item`
-				set description = %s
-				where item_code = %s and docstatus < 2
-			""",
-				(self.description, self.name),
-			)
+			BOMExplosionItem = frappe.qb.DocType("BOM Explosion Item")
+			(
+				frappe.qb.update(BOMExplosionItem)
+				.set(BOMExplosionItem.description, self.description)
+				.where((BOMExplosionItem.item_code == self.name) & (BOMExplosionItem.docstatus < 2))
+			).run()
 
 	def validate_item_defaults(self):
 		companies = {row.company for row in self.item_defaults}
