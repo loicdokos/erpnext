@@ -7,6 +7,7 @@ import copy
 import frappe
 from frappe import _
 from frappe.utils import add_days, flt, formatdate, getdate
+from pypika.terms import ExistsCriterion
 
 from erpnext.accounts.doctype.account_closing_balance.account_closing_balance import (
 	make_closing_entries,
@@ -287,40 +288,48 @@ class PeriodClosingVoucher(AccountsController):
 		self.accounting_dimension_fields = default_dimensions + get_accounting_dimensions()
 
 	def get_gl_entries_for_current_period(self, report_type, only_opening_entries=False, as_iterator=False):
-		date_condition = ""
-		if only_opening_entries:
-			date_condition = "is_opening = 'Yes'"
-		else:
-			date_condition = f"posting_date BETWEEN '{self.period_start_date}' AND '{self.period_end_date}' and is_opening = 'No'"
+		from pypika import Field
 
-		# nosemgrep
-		return frappe.db.sql(
-			"""
-			SELECT
-				name,
-				posting_date,
-				account,
-				account_currency,
-				debit_in_account_currency,
-				credit_in_account_currency,
-				debit,
-				credit,
-				{}
-			FROM `tabGL Entry`
-			WHERE
-				{}
-				AND company = %s
-				AND voucher_type != 'Period Closing Voucher'
-				AND EXISTS(SELECT name FROM `tabAccount` WHERE name = account AND report_type = %s)
-				AND is_cancelled = 0
-			""".format(
-				", ".join(self.accounting_dimension_fields),
-				date_condition,
-			),
-			(self.company, report_type),
-			as_dict=1,
-			as_iterator=as_iterator,
+		GLEntry = frappe.qb.DocType("GL Entry")
+		Account = frappe.qb.DocType("Account")
+
+		select_fields = [
+			GLEntry.name,
+			GLEntry.posting_date,
+			GLEntry.account,
+			GLEntry.account_currency,
+			GLEntry.debit_in_account_currency,
+			GLEntry.credit_in_account_currency,
+			GLEntry.debit,
+			GLEntry.credit,
+		]
+
+		if self.accounting_dimension_fields:
+			select_fields.extend([Field(f) for f in self.accounting_dimension_fields])
+
+		query = (
+			frappe.qb.from_(GLEntry)
+			.select(*select_fields)
+			.where(GLEntry.company == self.company)
+			.where(GLEntry.voucher_type != "Period Closing Voucher")
+			.where(GLEntry.is_cancelled == 0)
+			.where(
+				ExistsCriterion(
+					frappe.qb.from_(Account)
+					.select(Account.name)
+					.where(Account.name == GLEntry.account)
+					.where(Account.report_type == report_type)
+				)
+			)
 		)
+
+		if only_opening_entries:
+			query = query.where(GLEntry.is_opening == "Yes")
+		else:
+			query = query.where(GLEntry.posting_date[self.period_start_date : self.period_end_date]).where(
+				GLEntry.is_opening == "No"
+			)
+		return query.run(as_dict=1, as_iterator=as_iterator)
 
 	def set_account_balance_dict(self, gle, acc_bal_dict):
 		key = self.get_key(gle)
