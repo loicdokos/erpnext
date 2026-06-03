@@ -327,15 +327,16 @@ class Opportunity(TransactionBase, CRMNote):
 			).run()
 
 	def has_lost_quotation(self):
-		lost_quotation = frappe.db.sql(
-			"""
-			select name
-			from `tabQuotation`
-			where docstatus=1
-				and opportunity =%s and status = 'Lost'
-			""",
-			self.name,
-		)
+		Quotation = DocType("Quotation")
+		lost_quotation = (
+			frappe.qb.from_(Quotation)
+			.select(Quotation.name)
+			.where(
+				(Quotation.docstatus == 1)
+				& (Quotation.opportunity == self.name)
+				& (Quotation.status == "Lost")
+			)
+		).run()
 		if lost_quotation:
 			if self.has_active_quotation():
 				return False
