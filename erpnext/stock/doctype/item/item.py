@@ -1375,15 +1375,21 @@ def check_stock_uom_with_bin(item, stock_uom):
 				).format(item)
 			)
 
-	bin_list = frappe.db.sql(
-		"""
-			select * from `tabBin` where item_code = %s
-				and (reserved_qty > 0 or ordered_qty > 0 or indented_qty > 0 or planned_qty > 0)
-				and stock_uom != %s
-			""",
-		(item, stock_uom),
-		as_dict=1,
-	)
+	Bin = frappe.qb.DocType("Bin")
+	bin_list = (
+		frappe.qb.from_(Bin)
+		.select(Bin.name)
+		.where(
+			(Bin.item_code == item)
+			& (
+				(Bin.reserved_qty > 0)
+				| (Bin.ordered_qty > 0)
+				| (Bin.indented_qty > 0)
+				| (Bin.planned_qty > 0)
+			)
+			& (Bin.stock_uom != stock_uom)
+		)
+	).run(as_dict=1)
 
 	if bin_list:
 		frappe.throw(
@@ -1393,7 +1399,7 @@ def check_stock_uom_with_bin(item, stock_uom):
 		)
 
 	# No SLE or documents against item. Bin UOM can be changed safely.
-	frappe.db.sql("""update `tabBin` set stock_uom=%s where item_code=%s""", (stock_uom, item))
+	(frappe.qb.update(Bin).set(Bin.stock_uom, stock_uom).where(Bin.item_code == item)).run()
 
 
 def get_item_defaults(item_code, company):
