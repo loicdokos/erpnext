@@ -498,10 +498,16 @@ class PurchaseInvoice(BuyingController):
 				else:
 					# check if 'Stock Received But Not Billed' account is credited in Purchase receipt or not
 					if item.purchase_receipt:
-						negative_expense_booked_in_pr = frappe.db.sql(
-							"""select name from `tabGL Entry`
-							where voucher_type='Purchase Receipt' and voucher_no=%s and account = %s""",
-							(item.purchase_receipt, stock_not_billed_account),
+						gle = qb.DocType("GL Entry")
+						negative_expense_booked_in_pr = (
+							qb.from_(gle)
+							.select(gle.name)
+							.where(
+								(gle.voucher_type == "Purchase Receipt")
+								& (gle.voucher_no == item.purchase_receipt)
+								& (gle.account == stock_not_billed_account)
+							)
+							.run()
 						)
 
 						if negative_expense_booked_in_pr:
