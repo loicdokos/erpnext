@@ -278,7 +278,7 @@ def get_child_nodes(group_type, root):
 		.select(TargetDocType.name, TargetDocType.lft, TargetDocType.rgt)
 		.where(TargetDocType.lft >= lft)
 		.where(TargetDocType.rgt <= rgt)
-		.order_by(TargetDocType.lft)
+		.orderby(TargetDocType.lft)
 	)
 
 	return query.run(as_dict=1)
