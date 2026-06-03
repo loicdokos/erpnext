@@ -1770,21 +1770,22 @@ class PurchaseInvoice(BuyingController):
 			if cint(frappe.get_single_value("Accounts Settings", "check_supplier_invoice_uniqueness")):
 				fiscal_year = get_fiscal_year(self.posting_date, company=self.company, as_dict=True)
 
-				pi = frappe.db.sql(
-					"""select name from `tabPurchase Invoice`
-					where
-						bill_no = %(bill_no)s
-						and supplier = %(supplier)s
-						and name != %(name)s
-						and docstatus < 2
-						and posting_date between %(year_start_date)s and %(year_end_date)s""",
-					{
-						"bill_no": self.bill_no,
-						"supplier": self.supplier,
-						"name": self.name,
-						"year_start_date": fiscal_year.year_start_date,
-						"year_end_date": fiscal_year.year_end_date,
-					},
+				pi_table = qb.DocType("Purchase Invoice")
+				pi = (
+					qb.from_(pi_table)
+					.select(pi_table.name)
+					.where(
+						(pi_table.bill_no == self.bill_no)
+						& (pi_table.supplier == self.supplier)
+						& (pi_table.name != self.name)
+						& (pi_table.docstatus < 2)
+						& (
+							pi_table.posting_date.between(
+								fiscal_year.year_start_date, fiscal_year.year_end_date
+							)
+						)
+					)
+					.run()
 				)
 
 				if pi:
