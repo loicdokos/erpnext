@@ -84,11 +84,16 @@ class CostCenter(NestedSet):
 		return frappe.db.get_value("GL Entry", {"cost_center": self.name})
 
 	def check_if_child_exists(self):
-		return frappe.db.sql(
-			"select name from `tabCost Center` where \
-			parent_cost_center = %s and docstatus != 2",
-			self.name,
+		CostCenter = frappe.qb.DocType("Cost Center")
+
+		query = (
+			frappe.qb.from_(CostCenter)
+			.select(CostCenter.name)
+			.where(CostCenter.parent_cost_center == self.name)
+			.where(CostCenter.docstatus != 2)
 		)
+
+		return query.run()
 
 	def if_allocation_exists_against_cost_center(self):
 		return frappe.db.get_value(
