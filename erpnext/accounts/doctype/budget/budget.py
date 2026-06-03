@@ -381,6 +381,9 @@ class Budget(Document):
 
 
 def validate_expense_against_budget(params, expense_amount=0):
+	from frappe.query_builder.functions import IfNull
+	from pypika.terms import ExistsCriterion
+
 	params = frappe._dict(params)
 	if not frappe.db.count("Budget", cache=True):
 		return
@@ -392,18 +395,32 @@ def validate_expense_against_budget(params, expense_amount=0):
 	posting_fiscal_year = get_fiscal_year(posting_date, company=params.get("company"))[0]
 	year_start_date, year_end_date = get_fiscal_year_date_range(posting_fiscal_year, posting_fiscal_year)
 
-	budget_exists = frappe.db.sql(
-		"""
-		select name
-		from `tabBudget`
-		where company = %s
-		and docstatus = 1
-		and (SELECT year_start_date FROM `tabFiscal Year` WHERE name = from_fiscal_year) <= %s
-		and (SELECT year_end_date FROM `tabFiscal Year` WHERE name = to_fiscal_year) >= %s
-		limit 1
-		""",
-		(params.company, year_end_date, year_start_date),
+	Budget = frappe.qb.DocType("Budget")
+	FiscalYear = frappe.qb.DocType("Fiscal Year")
+
+	sub_start_date = (
+		frappe.qb.from_(FiscalYear)
+		.select(FiscalYear.year_start_date)
+		.where(FiscalYear.name == Budget.from_fiscal_year)
 	)
+
+	sub_end_date = (
+		frappe.qb.from_(FiscalYear)
+		.select(FiscalYear.year_end_date)
+		.where(FiscalYear.name == Budget.to_fiscal_year)
+	)
+
+	query = (
+		frappe.qb.from_(Budget)
+		.select(Budget.name)
+		.where(Budget.company == params.company)
+		.where(Budget.docstatus == 1)
+		.where(sub_start_date <= year_end_date)
+		.where(sub_end_date >= year_start_date)
+		.limit(1)
+	)
+
+	budget_exists = query.run()
 
 	if not budget_exists:
 		return
@@ -448,47 +465,57 @@ def validate_expense_against_budget(params, expense_amount=0):
 
 			if frappe.get_cached_value("DocType", doctype, "is_tree"):
 				lft, rgt = frappe.get_cached_value(doctype, params.get(budget_against), ["lft", "rgt"])
-				condition = f"""and exists(select name from `tab{doctype}`
-					where lft<={lft} and rgt>={rgt} and name=b.{budget_against})"""  # nosec
 				params.is_tree = True
 			else:
-				condition = f"and b.{budget_against}={frappe.db.escape(params.get(budget_against))}"
 				params.is_tree = False
 
 			params.budget_against_field = budget_against
 			params.budget_against_doctype = doctype
 
-			budget_records = frappe.db.sql(
-				f"""
-				SELECT
-					b.name,
-					b.{budget_against} AS budget_against,
-					b.budget_amount,
-					b.from_fiscal_year,
-					b.to_fiscal_year,
-					b.budget_start_date,
-					b.budget_end_date,
-					IFNULL(b.applicable_on_material_request, 0) AS for_material_request,
-					IFNULL(b.applicable_on_purchase_order, 0) AS for_purchase_order,
-					IFNULL(b.applicable_on_booking_actual_expenses, 0) AS for_actual_expenses,
-					b.action_if_annual_budget_exceeded,
-					b.action_if_accumulated_monthly_budget_exceeded,
-					b.action_if_annual_budget_exceeded_on_mr,
-					b.action_if_accumulated_monthly_budget_exceeded_on_mr,
-					b.action_if_annual_budget_exceeded_on_po,
-					b.action_if_accumulated_monthly_budget_exceeded_on_po
-				FROM
-					`tabBudget` b
-				WHERE
-					b.company = %s
-					AND b.docstatus = 1
-					AND %s BETWEEN b.budget_start_date AND b.budget_end_date
-					AND b.account = %s
-					{condition}
-				""",
-				(params.company, params.posting_date, params.account),
-				as_dict=True,
-			)  # nosec
+			Budget = frappe.qb.DocType("Budget")
+			budget_field = getattr(Budget, budget_against)
+
+			query = (
+				frappe.qb.from_(Budget)
+				.select(
+					Budget.name,
+					budget_field.as_("budget_against"),
+					Budget.budget_amount,
+					Budget.from_fiscal_year,
+					Budget.to_fiscal_year,
+					Budget.budget_start_date,
+					Budget.budget_end_date,
+					IfNull(Budget.applicable_on_material_request, 0).as_("for_material_request"),
+					IfNull(Budget.applicable_on_purchase_order, 0).as_("for_purchase_order"),
+					IfNull(Budget.applicable_on_booking_actual_expenses, 0).as_("for_actual_expenses"),
+					Budget.action_if_annual_budget_exceeded,
+					Budget.action_if_accumulated_monthly_budget_exceeded,
+					Budget.action_if_annual_budget_exceeded_on_mr,
+					Budget.action_if_accumulated_monthly_budget_exceeded_on_mr,
+					Budget.action_if_annual_budget_exceeded_on_po,
+					Budget.action_if_accumulated_monthly_budget_exceeded_on_po,
+				)
+				.where(Budget.company == params.company)
+				.where(Budget.docstatus == 1)
+				.where(Budget.budget_start_date <= params.posting_date)
+				.where(Budget.budget_end_date >= params.posting_date)
+				.where(Budget.account == params.account)
+			)
+
+			if params.is_tree:
+				tree_doctype = frappe.qb.DocType(doctype)
+				subquery = (
+					frappe.qb.from_(tree_doctype)
+					.select(tree_doctype.name)
+					.where(tree_doctype.lft <= lft)
+					.where(tree_doctype.rgt >= rgt)
+					.where(tree_doctype.name == budget_field)
+				)
+				query = query.where(ExistsCriterion(subquery))
+			else:
+				query = query.where(budget_field == params.get(budget_against))
+
+			budget_records = query.run(as_dict=True)
 
 			if budget_records:
 				validate_budget_records(params, budget_records, expense_amount)
