@@ -217,18 +217,21 @@ def _get_tree_conditions(args, parenttype, table, allow_blank=True):
 	return None
 
 
-def get_other_conditions(conditions, values, args):
+def get_other_conditions(PR, args):
+	from pypika.functions import Coalesce
+
+	criteria = []
+
 	for field in ["company", "customer", "supplier", "campaign", "sales_partner"]:
 		if args.get(field):
-			conditions += f" and ifnull(`tabPricing Rule`.{field}, '') in (%({field})s, '')"
-			values[field] = args.get(field)
+			criteria.append(Coalesce(PR[field], "").isin([args.get(field), ""]))
 		else:
-			conditions += f" and ifnull(`tabPricing Rule`.{field}, '') = ''"
+			criteria.append(Coalesce(PR[field], "") == "")
 
 	for parenttype in ["Customer Group", "Territory", "Supplier Group"]:
-		group_condition = _get_tree_conditions(args, parenttype, "`tabPricing Rule`")
-		if group_condition:
-			conditions += " and " + group_condition
+		criterion = _get_tree_conditions(args, parenttype, PR)
+		if criterion is not None:
+			criteria.append(criterion)
 
 	date = (
 		args.get("transaction_date")
@@ -236,9 +239,8 @@ def get_other_conditions(conditions, values, args):
 		or frappe.get_value(args.get("doctype"), args.get("name"), "posting_date", ignore=True)
 	)
 	if date:
-		conditions += """ and %(transaction_date)s between ifnull(`tabPricing Rule`.valid_from, '2000-01-01')
-			and ifnull(`tabPricing Rule`.valid_upto, '2500-12-31')"""
-		values["transaction_date"] = date
+		criteria.append(Coalesce(PR.valid_from, "2000-01-01") <= date)
+		criteria.append(Coalesce(PR.valid_upto, "2500-12-31") >= date)
 
 	if args.get("doctype") in [
 		"Quotation",
@@ -252,11 +254,11 @@ def get_other_conditions(conditions, values, args):
 		"POS Invoice",
 		"POS Invoice Item",
 	]:
-		conditions += """ and ifnull(`tabPricing Rule`.selling, 0) = 1"""
+		criteria.append(Coalesce(PR.selling, 0) == 1)
 	else:
-		conditions += """ and ifnull(`tabPricing Rule`.buying, 0) = 1"""
+		criteria.append(Coalesce(PR.buying, 0) == 1)
 
-	return conditions
+	return criteria
 
 
 def filter_pricing_rules(args, pricing_rules, doc=None):
