@@ -2271,6 +2271,7 @@ def get_outstanding_reference_documents(args: str | dict, validate: bool = False
 	common_filter = []
 	accounting_dimensions_filter = []
 	posting_and_due_date = []
+	extra_filters = []
 
 	# confirm that Supplier is not blocked
 	if args.get("party_type") == "Supplier":
@@ -2289,23 +2290,22 @@ def get_outstanding_reference_documents(args: str | dict, validate: bool = False
 	company_currency = frappe.get_cached_value("Company", args.get("company"), "default_currency")
 
 	# Get positive outstanding sales /purchase invoices
-	condition = ""
 	if args.get("voucher_type") and args.get("voucher_no"):
-		condition = f" and voucher_type={frappe.db.escape(args['voucher_type'])} and voucher_no={frappe.db.escape(args['voucher_no'])}"
 		common_filter.append(ple.voucher_type == args["voucher_type"])
 		common_filter.append(ple.voucher_no == args["voucher_no"])
+		extra_filters.append(["name", "=", args["voucher_no"]])
 
 	# Add cost center condition
 	if args.get("cost_center"):
-		condition += f" and cost_center={frappe.db.escape(args.get('cost_center'))}"
 		accounting_dimensions_filter.append(ple.cost_center == args.get("cost_center"))
+		extra_filters.append(["cost_center", "=", args.get("cost_center")])
 
 	# dynamic dimension filters
 	active_dimensions = get_dimensions()[0]
 	for dim in active_dimensions:
 		if args.get(dim.fieldname):
-			condition += f" and {dim.fieldname}={frappe.db.escape(args.get(dim.fieldname))}"
 			accounting_dimensions_filter.append(ple[dim.fieldname] == args.get(dim.fieldname))
+			extra_filters.append([dim.fieldname, "=", args.get(dim.fieldname)])
 
 	date_fields_dict = {
 		"posting_date": ["from_posting_date", "to_posting_date"],
@@ -2313,24 +2313,21 @@ def get_outstanding_reference_documents(args: str | dict, validate: bool = False
 	}
 
 	for fieldname, date_fields in date_fields_dict.items():
-		from_date = frappe.db.escape(str(args.get(date_fields[0]))) if args.get(date_fields[0]) else None
-		to_date = frappe.db.escape(str(args.get(date_fields[1]))) if args.get(date_fields[1]) else None
-
 		if args.get(date_fields[0]) and args.get(date_fields[1]):
-			condition += f" and {fieldname} between {from_date} and {to_date}"
 			posting_and_due_date.append(ple[fieldname][args.get(date_fields[0]) : args.get(date_fields[1])])
+			extra_filters.append([fieldname, "between", [args.get(date_fields[0]), args.get(date_fields[1])]])
 		elif args.get(date_fields[0]):
 			# if only from date is supplied
-			condition += f" and {fieldname} >= {from_date}"
 			posting_and_due_date.append(ple[fieldname].gte(args.get(date_fields[0])))
+			extra_filters.append([fieldname, ">=", args.get(date_fields[0])])
 		elif args.get(date_fields[1]):
 			# if only to date is supplied
-			condition += f" and {fieldname} <= {to_date}"
 			posting_and_due_date.append(ple[fieldname].lte(args.get(date_fields[1])))
+			extra_filters.append([fieldname, "<=", args.get(date_fields[1])])
 
 	if args.get("company"):
-		condition += " and company = {}".format(frappe.db.escape(args.get("company")))
 		common_filter.append(ple.company == args.get("company"))
+		extra_filters.append(["company", "=", args.get("company")])
 
 	outstanding_invoices = []
 	negative_outstanding_invoices = []
@@ -2382,7 +2379,7 @@ def get_outstanding_reference_documents(args: str | dict, validate: bool = False
 				args.get("party_account"),
 				party_account_currency,
 				company_currency,
-				condition=condition,
+				extra_filters=extra_filters,
 			)
 
 	# Get all SO / PO which are not fully billed or against which full advance not paid
@@ -2609,15 +2606,16 @@ def get_negative_outstanding_invoices(
 	party_account_currency,
 	company_currency,
 	cost_center=None,
-	condition=None,
+	extra_filters=None,
 ):
+	from pypika import Case
+
 	if party_type not in ["Customer", "Supplier"]:
 		return []
+
 	voucher_type = "Sales Invoice" if party_type == "Customer" else "Purchase Invoice"
-	account = "debit_to" if voucher_type == "Sales Invoice" else "credit_to"
-	supplier_condition = ""
-	if voucher_type == "Purchase Invoice":
-		supplier_condition = "and (release_date is null or release_date <= CURRENT_DATE)"
+	account_field = "debit_to" if voucher_type == "Sales Invoice" else "credit_to"
+
 	if party_account_currency == company_currency:
 		grand_total_field = "base_grand_total"
 		rounded_total_field = "base_rounded_total"
@@ -2625,38 +2623,47 @@ def get_negative_outstanding_invoices(
 		grand_total_field = "grand_total"
 		rounded_total_field = "rounded_total"
 
-	return frappe.db.sql(
-		"""
-		select
-			"{voucher_type}" as voucher_type, name as voucher_no, {account} as account,
-			if({rounded_total_field}, {rounded_total_field}, {grand_total_field}) as invoice_amount,
-			outstanding_amount, posting_date,
-			due_date, conversion_rate as exchange_rate
-		from
-			`tab{voucher_type}`
-		where
-			{party_type} = %s and {party_account} = %s and docstatus = 1 and
-			outstanding_amount < 0
-			{supplier_condition}
-			{condition}
-		order by
-			posting_date, name
-		""".format(
-			**{
-				"supplier_condition": supplier_condition,
-				"condition": condition,
-				"rounded_total_field": rounded_total_field,
-				"grand_total_field": grand_total_field,
-				"voucher_type": voucher_type,
-				"party_type": scrub(party_type),
-				"party_account": "debit_to" if party_type == "Customer" else "credit_to",
-				"cost_center": cost_center,
-				"account": account,
-			}
-		),
-		(party, party_account),
-		as_dict=True,
+	VT = frappe.qb.DocType(voucher_type)
+	rounded_field = VT[rounded_total_field]
+	grand_field = VT[grand_total_field]
+	invoice_amount_expr = Case().when(rounded_field != 0, rounded_field).else_(grand_field)
+
+	query = (
+		frappe.qb.from_(VT)
+		.select(
+			VT.name.as_("voucher_no"),
+			VT[account_field].as_("account"),
+			invoice_amount_expr.as_("invoice_amount"),
+			VT.outstanding_amount,
+			VT.posting_date,
+			VT.due_date,
+			VT.conversion_rate.as_("exchange_rate"),
+		)
+		.where(VT[scrub(party_type)] == party)
+		.where(VT[account_field] == party_account)
+		.where(VT.docstatus == 1)
+		.where(VT.outstanding_amount < 0)
+		.orderby(VT.posting_date, VT.name)
 	)
+
+	if voucher_type == "Purchase Invoice":
+		query = query.where(VT.release_date.isnull() | (VT.release_date <= nowdate()))
+
+	for f in extra_filters or []:
+		field, op, value = f
+		if op == "=":
+			query = query.where(VT[field] == value)
+		elif op == "between":
+			query = query.where(VT[field].between(value[0], value[1]))
+		elif op == ">=":
+			query = query.where(VT[field] >= value)
+		elif op == "<=":
+			query = query.where(VT[field] <= value)
+
+	results = query.run(as_dict=True)
+	for row in results:
+		row["voucher_type"] = voucher_type
+	return results
 
 
 @frappe.whitelist()
