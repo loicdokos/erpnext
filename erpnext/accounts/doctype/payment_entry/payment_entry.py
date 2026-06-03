@@ -2531,6 +2531,9 @@ def get_orders_to_be_billed(
 	cost_center=None,
 	filters=None,
 ):
+	from pypika import Case
+	from pypika.functions import Abs
+
 	voucher_type = None
 	if party_type == "Customer":
 		voucher_type = "Sales Order"
@@ -2540,13 +2543,6 @@ def get_orders_to_be_billed(
 	if not voucher_type:
 		return []
 
-	# dynamic dimension filters
-	condition = ""
-	active_dimensions = get_dimensions(True)[0]
-	for dim in active_dimensions:
-		if filters.get(dim.fieldname):
-			condition += f" and {dim.fieldname}={frappe.db.escape(filters.get(dim.fieldname))}"
-
 	if party_account_currency == company_currency:
 		grand_total_field = "base_grand_total"
 		rounded_total_field = "base_rounded_total"
@@ -2554,37 +2550,35 @@ def get_orders_to_be_billed(
 		grand_total_field = "grand_total"
 		rounded_total_field = "rounded_total"
 
-	orders = frappe.db.sql(
-		"""
-		select
-			name as voucher_no,
-			if({rounded_total_field}, {rounded_total_field}, {grand_total_field}) as invoice_amount,
-			(if({rounded_total_field}, {rounded_total_field}, {grand_total_field}) - advance_paid) as outstanding_amount,
-			transaction_date as posting_date
-		from
-			`tab{voucher_type}`
-		where
-			{party_type} = %s
-			and docstatus = 1
-			and company = %s
-			and status != "Closed"
-			and if({rounded_total_field}, {rounded_total_field}, {grand_total_field}) > advance_paid
-			and abs(100 - per_billed) > 0.01
-			{condition}
-		order by
-			transaction_date, name
-	""".format(
-			**{
-				"rounded_total_field": rounded_total_field,
-				"grand_total_field": grand_total_field,
-				"voucher_type": voucher_type,
-				"party_type": scrub(party_type),
-				"condition": condition,
-			}
-		),
-		(party, company),
-		as_dict=True,
+	VT = frappe.qb.DocType(voucher_type)
+	rounded_field = VT[rounded_total_field]
+	grand_field = VT[grand_total_field]
+	invoice_amount_expr = Case().when(rounded_field != 0, rounded_field).else_(grand_field)
+
+	query = (
+		frappe.qb.from_(VT)
+		.select(
+			VT.name.as_("voucher_no"),
+			invoice_amount_expr.as_("invoice_amount"),
+			(invoice_amount_expr - VT.advance_paid).as_("outstanding_amount"),
+			VT.transaction_date.as_("posting_date"),
+		)
+		.where(VT[scrub(party_type)] == party)
+		.where(VT.docstatus == 1)
+		.where(VT.company == company)
+		.where(VT.status != "Closed")
+		.where(invoice_amount_expr > VT.advance_paid)
+		.where(Abs(100 - VT.per_billed) > 0.01)
+		.orderby(VT.transaction_date, VT.name)
 	)
+
+	# dynamic dimension filters
+	active_dimensions = get_dimensions(True)[0]
+	for dim in active_dimensions:
+		if filters.get(dim.fieldname):
+			query = query.where(VT[dim.fieldname] == filters.get(dim.fieldname))
+
+	orders = query.run(as_dict=True)
 
 	order_list = []
 	for d in orders:
