@@ -713,14 +713,18 @@ class JournalEntry(AccountsController):
 				if d.reference_name == self.name:
 					frappe.throw(_("You can not enter current voucher in 'Against Journal Entry' column"))
 
-				against_entries = frappe.db.sql(
-					"""select * from `tabJournal Entry Account`
-					where account = %s and docstatus = 1 and parent = %s
-					and (reference_type is null or reference_type in ('', 'Sales Order', 'Purchase Order'))
-					""",
-					(d.account, d.reference_name),
-					as_dict=True,
-				)
+				JEA = frappe.qb.DocType("Journal Entry Account")
+				against_entries = (
+					frappe.qb.from_(JEA)
+					.select(JEA.debit, JEA.credit)
+					.where(JEA.account == d.account)
+					.where(JEA.docstatus == 1)
+					.where(JEA.parent == d.reference_name)
+					.where(
+						JEA.reference_type.isnull()
+						| JEA.reference_type.isin(["", "Sales Order", "Purchase Order"])
+					)
+				).run(as_dict=True)
 
 				if not against_entries:
 					if self.voucher_type != "Exchange Gain Or Loss":
