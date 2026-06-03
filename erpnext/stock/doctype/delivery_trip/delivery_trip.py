@@ -315,20 +315,19 @@ def get_contact_and_address(name: str):
 
 
 def get_default_contact(out, name):
-	contact_persons = frappe.db.sql(
-		"""
-			SELECT parent,
-				(SELECT is_primary_contact FROM tabContact c WHERE c.name = dl.parent) AS is_primary_contact
-			FROM
-				`tabDynamic Link` dl
-			WHERE
-				dl.link_doctype='Customer'
-				AND dl.link_name=%s
-				AND dl.parenttype = 'Contact'
-		""",
-		(name),
-		as_dict=1,
-	)
+	DynamicLink = frappe.qb.DocType("Dynamic Link")
+	Contact = frappe.qb.DocType("Contact")
+	contact_persons = (
+		frappe.qb.from_(DynamicLink)
+		.join(Contact)
+		.on(Contact.name == DynamicLink.parent)
+		.select(DynamicLink.parent, Contact.is_primary_contact)
+		.where(
+			(DynamicLink.link_doctype == "Customer")
+			& (DynamicLink.link_name == name)
+			& (DynamicLink.parenttype == "Contact")
+		)
+	).run(as_dict=1)
 
 	if contact_persons:
 		for out.contact_person in contact_persons:
