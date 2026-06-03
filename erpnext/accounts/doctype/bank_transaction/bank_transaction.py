@@ -526,31 +526,50 @@ def get_total_allocated_amount(docs):
 		return {}
 
 	# nosemgrep: frappe-semgrep-rules.rules.frappe-using-db-sql
-	result = frappe.db.sql(
-		"""
-		SELECT total, latest_date, gl_account, payment_document, payment_entry FROM (
-			SELECT
-				ROW_NUMBER() OVER w AS rownum,
-				SUM(btp.allocated_amount) OVER(PARTITION BY ba.account, btp.payment_document, btp.payment_entry) AS total,
-				FIRST_VALUE(bt.date) OVER w AS latest_date,
-				ba.account AS gl_account,
-				btp.payment_document,
-				btp.payment_entry
-			FROM
-				`tabBank Transaction Payments` btp
-			LEFT JOIN `tabBank Transaction` bt ON bt.name=btp.parent
-			LEFT JOIN `tabBank Account` ba ON ba.name=bt.bank_account
-			WHERE
-				(btp.payment_document, btp.payment_entry) IN %(docs)s
-				AND bt.docstatus = 1
-			WINDOW w AS (PARTITION BY ba.account, btp.payment_document, btp.payment_entry ORDER BY bt.date DESC)
-		) temp
-		WHERE
-			rownum = 1
-		""",
-		dict(docs=docs),
-		as_dict=True,
-	)
+	BTP = frappe.qb.DocType("Bank Transaction Payments")
+	BT = frappe.qb.DocType("Bank Transaction")
+	BA = frappe.qb.DocType("Bank Account")
+
+	docs_set = set(docs)
+
+	rows = (
+		frappe.qb.from_(BTP)
+		.left_join(BT)
+		.on(BT.name == BTP.parent)
+		.left_join(BA)
+		.on(BA.name == BT.bank_account)
+		.select(
+			BA.account.as_("gl_account"),
+			BTP.payment_document,
+			BTP.payment_entry,
+			BT.date,
+			BTP.allocated_amount,
+		)
+		.where(BT.docstatus == 1)
+	).run(as_dict=True)
+
+	rows = [r for r in rows if (r["payment_document"], r["payment_entry"]) in docs_set]
+
+	from collections import defaultdict
+
+	groups = defaultdict(list)
+	for row in rows:
+		key = (row["gl_account"], row["payment_document"], row["payment_entry"])
+		groups[key].append(row)
+
+	result = []
+	for (gl_account, payment_document, payment_entry), group_rows in groups.items():
+		group_rows.sort(key=lambda r: r["date"] or "", reverse=True)
+
+		result.append(
+			{
+				"total": sum(r["allocated_amount"] or 0 for r in group_rows),
+				"latest_date": group_rows[0]["date"],
+				"gl_account": gl_account,
+				"payment_document": payment_document,
+				"payment_entry": payment_entry,
+			}
+		)
 
 	payment_allocation_details = {}
 	for row in result:
