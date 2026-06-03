@@ -847,27 +847,18 @@ class PaymentEntry(AccountsController):
 			)
 			base_outstanding = flt(allocated_amount * conversion_rate, base_outstanding_precision)
 
+			PS = frappe.qb.DocType("Payment Schedule")
 			if cancel:
-				frappe.db.sql(
-					"""
-					UPDATE `tabPayment Schedule`
-					SET
-						paid_amount = `paid_amount` - %s,
-						base_paid_amount = `base_paid_amount` - %s,
-						discounted_amount = `discounted_amount` - %s,
-						outstanding = `outstanding` + %s,
-						base_outstanding = `base_outstanding` - %s
-					WHERE parent = %s and payment_term = %s""",
-					(
-						allocated_amount - discounted_amt,
-						base_paid_amount,
-						discounted_amt,
-						allocated_amount,
-						base_outstanding,
-						key[1],
-						key[0],
-					),
-				)
+				(
+					frappe.qb.update(PS)
+					.set(PS.paid_amount, PS.paid_amount - (allocated_amount - discounted_amt))
+					.set(PS.base_paid_amount, PS.base_paid_amount - base_paid_amount)
+					.set(PS.discounted_amount, PS.discounted_amount - discounted_amt)
+					.set(PS.outstanding, PS.outstanding + allocated_amount)
+					.set(PS.base_outstanding, PS.base_outstanding - base_outstanding)
+					.where(PS.parent == key[1])
+					.where(PS.payment_term == key[0])
+				).run()
 			else:
 				if allocated_amount > outstanding:
 					frappe.throw(
@@ -877,26 +868,16 @@ class PaymentEntry(AccountsController):
 					)
 
 				if allocated_amount and outstanding:
-					frappe.db.sql(
-						"""
-						UPDATE `tabPayment Schedule`
-						SET
-							paid_amount = `paid_amount` + %s,
-							base_paid_amount = `base_paid_amount` + %s,
-							discounted_amount = `discounted_amount` + %s,
-							outstanding = `outstanding` - %s,
-							base_outstanding = `base_outstanding` - %s
-						WHERE parent = %s and payment_term = %s""",
-						(
-							allocated_amount - discounted_amt,
-							base_paid_amount,
-							discounted_amt,
-							allocated_amount,
-							base_outstanding,
-							key[1],
-							key[0],
-						),
-					)
+					(
+						frappe.qb.update(PS)
+						.set(PS.paid_amount, PS.paid_amount + (allocated_amount - discounted_amt))
+						.set(PS.base_paid_amount, PS.base_paid_amount + base_paid_amount)
+						.set(PS.discounted_amount, PS.discounted_amount + discounted_amt)
+						.set(PS.outstanding, PS.outstanding - allocated_amount)
+						.set(PS.base_outstanding, PS.base_outstanding - base_outstanding)
+						.where(PS.parent == key[1])
+						.where(PS.payment_term == key[0])
+					).run()
 
 	def get_allocated_amount_in_transaction_currency(
 		self, allocated_amount, reference_doctype, reference_docname
