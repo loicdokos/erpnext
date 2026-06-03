@@ -176,11 +176,16 @@ def clean_serial_no_string(serial_no: str) -> str:
 
 
 def update_maintenance_status():
-	serial_nos = frappe.db.sql(
-		"""select name from `tabSerial No` where (amc_expiry_date<%s or
-		warranty_expiry_date<%s) and maintenance_status not in ('Out of Warranty', 'Out of AMC')""",
-		(nowdate(), nowdate()),
-	)
+	SerialNo = frappe.qb.DocType("Serial No")
+	today = nowdate()
+	serial_nos = (
+		frappe.qb.from_(SerialNo)
+		.select(SerialNo.name)
+		.where(
+			((SerialNo.amc_expiry_date < today) | (SerialNo.warranty_expiry_date < today))
+			& (SerialNo.maintenance_status.notin(["Out of Warranty", "Out of AMC"]))
+		)
+	).run()
 	for serial_no in serial_nos:
 		doc = frappe.get_doc("Serial No", serial_no[0])
 		doc.set_maintenance_status()
