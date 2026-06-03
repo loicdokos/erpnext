@@ -3513,27 +3513,26 @@ def get_reference_as_per_payment_terms(
 
 
 def get_paid_amount(dt, dn, party_type, party, account, due_date):
+	GLE = frappe.qb.DocType("GL Entry")
+
 	if party_type == "Customer":
-		dr_or_cr = "credit_in_account_currency - debit_in_account_currency"
+		amount_expr = GLE.credit_in_account_currency - GLE.debit_in_account_currency
 	else:
-		dr_or_cr = "debit_in_account_currency - credit_in_account_currency"
+		amount_expr = GLE.debit_in_account_currency - GLE.credit_in_account_currency
 
-	paid_amount = frappe.db.sql(
-		f"""
-		select ifnull(sum({dr_or_cr}), 0) as paid_amount
-		from `tabGL Entry`
-		where against_voucher_type = %s
-			and against_voucher = %s
-			and party_type = %s
-			and party = %s
-			and account = %s
-			and due_date = %s
-			and {dr_or_cr} > 0
-	""",
-		(dt, dn, party_type, party, account, due_date),
-	)
+	result = (
+		frappe.qb.from_(GLE)
+		.select(Coalesce(Sum(amount_expr), 0))
+		.where(GLE.against_voucher_type == dt)
+		.where(GLE.against_voucher == dn)
+		.where(GLE.party_type == party_type)
+		.where(GLE.party == party)
+		.where(GLE.account == account)
+		.where(GLE.due_date == due_date)
+		.where(amount_expr > 0)
+	).run()
 
-	return paid_amount[0][0] if paid_amount else 0
+	return result[0][0] if result else 0
 
 
 @frappe.whitelist()
