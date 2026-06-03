@@ -669,16 +669,19 @@ class Item(Document):
 		frappe.db.delete("Bin", {"item_code": old_name})
 
 	def validate_duplicate_item_in_stock_reconciliation(self, old_name, new_name):
-		records = frappe.db.sql(
-			""" SELECT parent, COUNT(*) as records
-			FROM `tabStock Reconciliation Item`
-			WHERE item_code = %s and docstatus = 1
-			GROUP By item_code, warehouse, parent
-			HAVING records > 1
-		""",
-			new_name,
-			as_dict=1,
-		)
+		StockReconciliationItem = frappe.qb.DocType("Stock Reconciliation Item")
+		count_expr = Count("*")
+		records = (
+			frappe.qb.from_(StockReconciliationItem)
+			.select(StockReconciliationItem.parent, count_expr.as_("records"))
+			.where((StockReconciliationItem.item_code == new_name) & (StockReconciliationItem.docstatus == 1))
+			.groupby(
+				StockReconciliationItem.item_code,
+				StockReconciliationItem.warehouse,
+				StockReconciliationItem.parent,
+			)
+			.having(count_expr > 1)
+		).run(as_dict=1)
 
 		if not records:
 			return
