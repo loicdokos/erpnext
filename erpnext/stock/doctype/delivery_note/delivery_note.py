@@ -271,12 +271,13 @@ class DeliveryNote(SellingController):
 	def set_actual_qty(self):
 		for d in self.get("items"):
 			if d.item_code and d.warehouse:
-				actual_qty = frappe.db.sql(
-					"""select actual_qty from `tabBin`
-					where item_code = %s and warehouse = %s""",
-					(d.item_code, d.warehouse),
-				)
-				d.actual_qty = actual_qty and flt(actual_qty[0][0]) or 0
+				Bin = frappe.qb.DocType("Bin")
+				result = (
+					frappe.qb.from_(Bin)
+					.select(Bin.actual_qty)
+					.where((Bin.item_code == d.item_code) & (Bin.warehouse == d.warehouse))
+				).run()
+				d.actual_qty = flt(result[0][0]) if result else 0
 
 	def so_required(self):
 		"""check in manage account if sales order required or not"""
