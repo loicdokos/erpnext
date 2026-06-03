@@ -25,13 +25,12 @@ apply_on_table = {"Item Code": "items", "Item Group": "item_groups", "Brand": "b
 
 def get_pricing_rules(args, doc=None):
 	pricing_rules = []
-	values = {}
 
 	if not frappe.db.count("Pricing Rule", cache=True):
 		return
 
 	for apply_on in ["Item Code", "Item Group", "Brand"]:
-		pricing_rules.extend(_get_pricing_rules(apply_on, args, values))
+		pricing_rules.extend(_get_pricing_rules(apply_on, args))
 		if pricing_rules and pricing_rules[0].has_priority:
 			continue
 
@@ -98,78 +97,69 @@ def filter_pricing_rule_based_on_condition(pricing_rules, doc=None):
 	return filtered_pricing_rules
 
 
-def _get_pricing_rules(apply_on, args, values):
+def _get_pricing_rules(apply_on, args):
+	from pypika.functions import Coalesce
+
 	apply_on_field = frappe.scrub(apply_on)
 
 	if not args.get(apply_on_field):
 		return []
 
-	child_doc = f"`tabPricing Rule {apply_on}`"
+	PR = frappe.qb.DocType("Pricing Rule")
+	Child = frappe.qb.DocType(f"Pricing Rule {apply_on}")
 
-	conditions = item_variant_condition = item_conditions = ""
-	values[apply_on_field] = args.get(apply_on_field)
-	if apply_on_field in ["item_code", "brand"]:
-		item_conditions = f"{child_doc}.{apply_on_field}= %({apply_on_field})s"
-
+	# Build item criterion
+	if apply_on_field == "item_group":
+		item_criterion = _get_tree_conditions(args, "Item Group", Child, allow_blank=False)
+		if args.get("uom"):
+			item_criterion &= (Child.uom == args.get("uom")) | (Coalesce(Child.uom, "") == "")
+	else:  # item_code or brand
+		item_criterion = Child[apply_on_field] == args.get(apply_on_field)
 		if apply_on_field == "item_code":
-			if args.get("uom", None):
-				item_conditions += (
-					" and ({child_doc}.uom={item_uom} or IFNULL({child_doc}.uom, '')='')".format(
-						child_doc=child_doc, item_uom=frappe.db.escape(args.get("uom"))
-					)
-				)
+			if args.get("uom"):
+				item_criterion &= (Child.uom == args.get("uom")) | (Coalesce(Child.uom, "") == "")
 			if "variant_of" not in args:
 				args.variant_of = frappe.get_cached_value("Item", args.item_code, "variant_of")
 
-			if args.variant_of:
-				item_variant_condition = f" or {child_doc}.item_code=%(variant_of)s "
-				values["variant_of"] = args.variant_of
-	elif apply_on_field == "item_group":
-		item_conditions = _get_tree_conditions(args, "Item Group", child_doc, False)
-		if args.get("uom", None):
-			item_conditions += " and ({child_doc}.uom={item_uom} or IFNULL({child_doc}.uom, '')='')".format(
-				child_doc=child_doc, item_uom=frappe.db.escape(args.get("uom"))
-			)
-
-	conditions += get_other_conditions(conditions, values, args)
-	warehouse_conditions = _get_tree_conditions(args, "Warehouse", "`tabPricing Rule`")
-	if warehouse_conditions:
-		warehouse_conditions = f" and {warehouse_conditions}"
-
-	if not args.price_list:
-		args.price_list = None
-
-	conditions += " and ifnull(`tabPricing Rule`.for_price_list, '') in (%(price_list)s, '')"
-	values["price_list"] = args.get("price_list")
-
-	pricing_rules = (
-		frappe.db.sql(
-			"""select `tabPricing Rule`.*,
-			{child_doc}.{apply_on_field}, {child_doc}.uom
-		from `tabPricing Rule`, {child_doc}
-		where ({item_conditions} or (`tabPricing Rule`.apply_rule_on_other is not null
-			and `tabPricing Rule`.{apply_on_other_field}=%({apply_on_field})s) {item_variant_condition})
-			and {child_doc}.parent = `tabPricing Rule`.name
-			and `tabPricing Rule`.disable = 0 and
-			`tabPricing Rule`.{transaction_type} = 1 {warehouse_cond} {conditions}
-		order by `tabPricing Rule`.priority desc,
-			`tabPricing Rule`.name desc""".format(
-				child_doc=child_doc,
-				apply_on_field=apply_on_field,
-				item_conditions=item_conditions,
-				item_variant_condition=item_variant_condition,
-				transaction_type=args.transaction_type,
-				warehouse_cond=warehouse_conditions,
-				apply_on_other_field=f"other_{apply_on_field}",
-				conditions=conditions,
-			),
-			values,
-			as_dict=1,
-		)
-		or []
+	# apply_rule_on_other criterion
+	apply_on_other_criterion = PR.apply_rule_on_other.notnull() & (
+		PR[f"other_{apply_on_field}"] == args.get(apply_on_field)
 	)
 
-	return pricing_rules
+	# Combine item + other + variant
+	if apply_on_field == "item_code" and args.get("variant_of"):
+		full_item_criterion = item_criterion | apply_on_other_criterion | (Child.item_code == args.variant_of)
+	else:
+		full_item_criterion = item_criterion | apply_on_other_criterion
+
+	# Price list criterion
+	price_list = args.get("price_list") or None
+	if price_list:
+		price_list_criterion = Coalesce(PR.for_price_list, "").isin([price_list, ""])
+	else:
+		price_list_criterion = Coalesce(PR.for_price_list, "") == ""
+
+	query = (
+		frappe.qb.from_(PR)
+		.join(Child)
+		.on(Child.parent == PR.name)
+		.select(PR.star, Child[apply_on_field], Child.uom)
+		.where(full_item_criterion)
+		.where(PR.disable == 0)
+		.where(PR[args.transaction_type] == 1)
+		.where(price_list_criterion)
+		.orderby(PR.priority, order=frappe.qb.desc)
+		.orderby(PR.name, order=frappe.qb.desc)
+	)
+
+	warehouse_criterion = _get_tree_conditions(args, "Warehouse", PR)
+	if warehouse_criterion is not None:
+		query = query.where(warehouse_criterion)
+
+	for criterion in get_other_conditions(PR, args):
+		query = query.where(criterion)
+
+	return query.run(as_dict=1) or []
 
 
 def apply_multiple_pricing_rules(pricing_rules):
