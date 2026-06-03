@@ -62,12 +62,15 @@ class WarrantyClaim(TransactionBase):
 			self.resolution_date = now_datetime()
 
 	def on_cancel(self):
-		lst = frappe.db.sql(
-			"""select t1.name
-			from `tabMaintenance Visit` t1, `tabMaintenance Visit Purpose` t2
-			where t2.parent = t1.name and t2.prevdoc_docname = %s and	t1.docstatus!=2""",
-			(self.name),
-		)
+		MaintenanceVisit = frappe.qb.DocType("Maintenance Visit")
+		MaintenanceVisitPurpose = frappe.qb.DocType("Maintenance Visit Purpose")
+		lst = (
+			frappe.qb.from_(MaintenanceVisit)
+			.join(MaintenanceVisitPurpose)
+			.on(MaintenanceVisitPurpose.parent == MaintenanceVisit.name)
+			.select(MaintenanceVisit.name)
+			.where((MaintenanceVisitPurpose.prevdoc_docname == self.name) & (MaintenanceVisit.docstatus != 2))
+		).run()
 		if lst:
 			lst1 = ",".join(x[0] for x in lst)
 			frappe.throw(_("Cancel Material Visit {0} before cancelling this Warranty Claim").format(lst1))
