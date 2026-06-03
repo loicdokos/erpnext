@@ -701,11 +701,12 @@ class DeliveryNote(SellingController):
 		"""
 		Cancel submitted packing slips related to this delivery note
 		"""
-		res = frappe.db.sql(
-			"""SELECT name FROM `tabPacking Slip` WHERE delivery_note = %s
-			AND docstatus = 1""",
-			self.name,
-		)
+		PackingSlip = frappe.qb.DocType("Packing Slip")
+		res = (
+			frappe.qb.from_(PackingSlip)
+			.select(PackingSlip.name)
+			.where((PackingSlip.delivery_note == self.name) & (PackingSlip.docstatus == 1))
+		).run()
 
 		if res:
 			for r in res:
