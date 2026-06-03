@@ -126,21 +126,30 @@ class MaterialRequest(BuyingController):
 
 		for so_no in so_items.keys():
 			for item in so_items[so_no].keys():
-				already_indented = frappe.db.sql(
-					"""select sum(qty)
-					from `tabMaterial Request Item`
-					where item_code = %s and sales_order = %s and
-					docstatus = 1 and parent != %s""",
-					(item, so_no, self.name),
-				)
-				already_indented = already_indented and flt(already_indented[0][0]) or 0
+				MaterialRequestItem = frappe.qb.DocType("Material Request Item")
+				result = (
+					frappe.qb.from_(MaterialRequestItem)
+					.select(Sum(MaterialRequestItem.qty))
+					.where(
+						(MaterialRequestItem.item_code == item)
+						& (MaterialRequestItem.sales_order == so_no)
+						& (MaterialRequestItem.docstatus == 1)
+						& (MaterialRequestItem.parent != self.name)
+					)
+				).run()
+				already_indented = flt(result[0][0]) if result and result[0][0] else 0
 
-				actual_so_qty = frappe.db.sql(
-					"""select sum(stock_qty) from `tabSales Order Item`
-					where parent = %s and item_code = %s and docstatus = 1""",
-					(so_no, item),
-				)
-				actual_so_qty = actual_so_qty and flt(actual_so_qty[0][0]) or 0
+				SalesOrderItem = frappe.qb.DocType("Sales Order Item")
+				result = (
+					frappe.qb.from_(SalesOrderItem)
+					.select(Sum(SalesOrderItem.stock_qty))
+					.where(
+						(SalesOrderItem.parent == so_no)
+						& (SalesOrderItem.item_code == item)
+						& (SalesOrderItem.docstatus == 1)
+					)
+				).run()
+				actual_so_qty = flt(result[0][0]) if result and result[0][0] else 0
 
 				if actual_so_qty and (flt(so_items[so_no][item]) + already_indented > actual_so_qty):
 					frappe.throw(
