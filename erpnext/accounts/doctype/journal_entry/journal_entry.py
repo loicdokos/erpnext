@@ -1615,6 +1615,8 @@ def get_against_jv(
 
 @frappe.whitelist()
 def get_outstanding(args: str | dict):
+	from pypika.functions import Sum
+
 	if not frappe.has_permission("Account"):
 		frappe.msgprint(_("No Permission"), raise_exception=1)
 
@@ -1625,16 +1627,18 @@ def get_outstanding(args: str | dict):
 	due_date = None
 
 	if args.get("doctype") == "Journal Entry":
-		condition = " and party=%(party)s" if args.get("party") else ""
-
-		against_jv_amount = frappe.db.sql(
-			f"""
-			select sum(debit_in_account_currency) - sum(credit_in_account_currency)
-			from `tabJournal Entry Account` where parent=%(docname)s and account=%(account)s {condition}
-			and (reference_type is null or reference_type = '')""",
-			args,
+		JEA = frappe.qb.DocType("Journal Entry Account")
+		query = (
+			frappe.qb.from_(JEA)
+			.select(Sum(JEA.debit_in_account_currency) - Sum(JEA.credit_in_account_currency))
+			.where(JEA.parent == args["docname"])
+			.where(JEA.account == args["account"])
+			.where(JEA.reference_type.isnull() | (JEA.reference_type == ""))
 		)
+		if args.get("party"):
+			query = query.where(JEA.party == args["party"])
 
+		against_jv_amount = query.run()
 		against_jv_amount = flt(against_jv_amount[0][0]) if against_jv_amount else 0
 		amount_field = "credit_in_account_currency" if against_jv_amount > 0 else "debit_in_account_currency"
 		return {amount_field: abs(against_jv_amount)}
