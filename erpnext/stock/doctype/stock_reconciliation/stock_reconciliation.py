@@ -1260,44 +1260,59 @@ def get_item_and_warehouses(item_code, warehouse):
 
 def get_items_for_stock_reco(warehouse, company):
 	lft, rgt = frappe.db.get_value("Warehouse", warehouse, ["lft", "rgt"])
-	items = frappe.db.sql(
-		f"""
-		select
-			i.name as item_code, i.item_name, bin.warehouse as warehouse, i.has_serial_no, i.has_batch_no
-		from
-			`tabBin` bin, `tabItem` i
-		where
-			i.name = bin.item_code
-			and IFNULL(i.disabled, 0) = 0
-			and i.is_stock_item = 1
-			and i.has_variants = 0
-			and exists(
-				select name from `tabWarehouse` where lft >= {lft} and rgt <= {rgt} and name = bin.warehouse and is_group = 0
-			)
-	""",
-		as_dict=1,
-	)
 
-	items += frappe.db.sql(
-		"""
-		select
-			i.name as item_code, i.item_name, id.default_warehouse as warehouse, i.has_serial_no, i.has_batch_no
-		from
-			`tabItem` i, `tabItem Default` id
-		where
-			i.name = id.parent
-			and exists(
-				select name from `tabWarehouse` where lft >= %s and rgt <= %s and name=id.default_warehouse and is_group = 0
-			)
-			and i.is_stock_item = 1
-			and i.has_variants = 0
-			and IFNULL(i.disabled, 0) = 0
-			and id.company = %s
-		group by i.name
-	""",
-		(lft, rgt, company),
-		as_dict=1,
-	)
+	Bin = frappe.qb.DocType("Bin")
+	Item = frappe.qb.DocType("Item")
+	Wh = frappe.qb.DocType("Warehouse")
+
+	items = (
+		frappe.qb.from_(Bin)
+		.join(Item)
+		.on(Item.name == Bin.item_code)
+		.join(Wh)
+		.on((Wh.name == Bin.warehouse) & (Wh.lft >= lft) & (Wh.rgt <= rgt) & (Wh.is_group == 0))
+		.select(
+			Item.name.as_("item_code"),
+			Item.item_name,
+			Bin.warehouse,
+			Item.has_serial_no,
+			Item.has_batch_no,
+		)
+		.where(
+			(Item.disabled.isnull() | (Item.disabled == 0))
+			& (Item.is_stock_item == 1)
+			& (Item.has_variants == 0)
+		)
+	).run(as_dict=1)
+
+	ItemDefault = frappe.qb.DocType("Item Default")
+
+	items += (
+		frappe.qb.from_(Item)
+		.join(ItemDefault)
+		.on(Item.name == ItemDefault.parent)
+		.join(Wh)
+		.on(
+			(Wh.name == ItemDefault.default_warehouse)
+			& (Wh.lft >= lft)
+			& (Wh.rgt <= rgt)
+			& (Wh.is_group == 0)
+		)
+		.select(
+			Item.name.as_("item_code"),
+			Item.item_name,
+			ItemDefault.default_warehouse.as_("warehouse"),
+			Item.has_serial_no,
+			Item.has_batch_no,
+		)
+		.where(
+			(Item.is_stock_item == 1)
+			& (Item.has_variants == 0)
+			& (Item.disabled.isnull() | (Item.disabled == 0))
+			& (ItemDefault.company == company)
+		)
+		.distinct()
+	).run(as_dict=1)
 
 	# remove duplicates
 	# check if item-warehouse key extracted from each entry exists in set iw_keys
