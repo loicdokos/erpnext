@@ -360,14 +360,18 @@ class PurchaseReceipt(BuyingController):
 					frappe.throw(_(msg))
 
 	def get_already_received_qty(self, po, po_detail):
-		qty = frappe.db.sql(
-			"""select sum(qty) from `tabPurchase Receipt Item`
-			where purchase_order_item = %s and docstatus = 1
-			and purchase_order=%s
-			and parent != %s""",
-			(po_detail, po, self.name),
-		)
-		return qty and flt(qty[0][0]) or 0.0
+		PurchaseReceiptItem = frappe.qb.DocType("Purchase Receipt Item")
+		result = (
+			frappe.qb.from_(PurchaseReceiptItem)
+			.select(Sum(PurchaseReceiptItem.qty))
+			.where(
+				(PurchaseReceiptItem.purchase_order_item == po_detail)
+				& (PurchaseReceiptItem.docstatus == 1)
+				& (PurchaseReceiptItem.purchase_order == po)
+				& (PurchaseReceiptItem.parent != self.name)
+			)
+		).run()
+		return flt(result[0][0]) if result and result[0][0] else 0.0
 
 	def get_po_qty_and_warehouse(self, po_detail):
 		po_qty, po_warehouse = frappe.db.get_value("Purchase Order Item", po_detail, ["qty", "warehouse"])
