@@ -39,17 +39,27 @@ def get_loyalty_point_entries(customer, loyalty_program, company, expiry_date=No
 	if not expiry_date:
 		expiry_date = today()
 
-	return frappe.db.sql(
-		"""
-		select name, loyalty_points, expiry_date, loyalty_program_tier, invoice_type, invoice
-		from `tabLoyalty Point Entry`
-		where customer=%s and loyalty_program=%s
-			and expiry_date>=%s and loyalty_points>0 and company=%s
-		order by expiry_date
-	""",
-		(customer, loyalty_program, expiry_date, company),
-		as_dict=1,
+	LoyaltyPointEntry = frappe.qb.DocType("Loyalty Point Entry")
+
+	query = (
+		frappe.qb.from_(LoyaltyPointEntry)
+		.select(
+			LoyaltyPointEntry.name,
+			LoyaltyPointEntry.loyalty_points,
+			LoyaltyPointEntry.expiry_date,
+			LoyaltyPointEntry.loyalty_program_tier,
+			LoyaltyPointEntry.invoice_type,
+			LoyaltyPointEntry.invoice,
+		)
+		.where(LoyaltyPointEntry.customer == customer)
+		.where(LoyaltyPointEntry.loyalty_program == loyalty_program)
+		.where(LoyaltyPointEntry.expiry_date >= expiry_date)
+		.where(LoyaltyPointEntry.loyalty_points > 0)
+		.where(LoyaltyPointEntry.company == company)
+		.orderby(LoyaltyPointEntry.expiry_date)
 	)
+
+	return query.run(as_dict=1)
 
 
 def get_redemption_details(customer, loyalty_program, company):
