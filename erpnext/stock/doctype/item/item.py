@@ -606,12 +606,14 @@ class Item(Document):
 
 	def stock_ledger_created(self):
 		if not hasattr(self, "_stock_ledger_created"):
+			StockLedgerEntry = frappe.qb.DocType("Stock Ledger Entry")
 			self._stock_ledger_created = len(
-				frappe.db.sql(
-					"""select name from `tabStock Ledger Entry`
-				where item_code = %s and is_cancelled = 0 limit 1""",
-					self.name,
-				)
+				(
+					frappe.qb.from_(StockLedgerEntry)
+					.select(StockLedgerEntry.name)
+					.where((StockLedgerEntry.item_code == self.name) & (StockLedgerEntry.is_cancelled == 0))
+					.limit(1)
+				).run()
 			)
 		return self._stock_ledger_created
 
