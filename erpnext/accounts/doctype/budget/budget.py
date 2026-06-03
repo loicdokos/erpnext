@@ -114,25 +114,36 @@ class Budget(Document):
 
 		if not account:
 			return
+		Budget = frappe.qb.DocType("Budget")
+		FiscalYear = frappe.qb.DocType("Fiscal Year")
 
-		existing_budget = frappe.db.sql(
-			f"""
-			SELECT name, account
-			FROM `tabBudget`
-			WHERE
-				docstatus < 2
-				AND company = %s
-				AND {budget_against_field} = %s
-				AND account = %s
-				AND name != %s
-				AND (
-					(SELECT year_start_date FROM `tabFiscal Year` WHERE name = from_fiscal_year) <= %s
-					AND (SELECT year_end_date FROM `tabFiscal Year` WHERE name = to_fiscal_year) >= %s
-				)
-			""",
-			(self.company, budget_against, account, self.name, self.budget_end_date, self.budget_start_date),
-			as_dict=True,
+		budget_field = getattr(Budget, budget_against_field)
+
+		sub_start_date = (
+			frappe.qb.from_(FiscalYear)
+			.select(FiscalYear.year_start_date)
+			.where(FiscalYear.name == Budget.from_fiscal_year)
 		)
+
+		sub_end_date = (
+			frappe.qb.from_(FiscalYear)
+			.select(FiscalYear.year_end_date)
+			.where(FiscalYear.name == Budget.to_fiscal_year)
+		)
+
+		query = (
+			frappe.qb.from_(Budget)
+			.select(Budget.name, Budget.account)
+			.where(Budget.docstatus < 2)
+			.where(Budget.company == self.company)
+			.where(budget_field == budget_against)
+			.where(Budget.account == account)
+			.where(Budget.name != self.name)
+			.where(sub_start_date <= self.budget_end_date)
+			.where(sub_end_date >= self.budget_start_date)
+		)
+
+		existing_budget = query.run(as_dict=True)
 
 		if existing_budget:
 			d = existing_budget[0]
