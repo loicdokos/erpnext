@@ -101,12 +101,16 @@ class SerialNo(StockController):
 			self.maintenance_status = "Under Warranty"
 
 	def on_trash(self):
-		sl_entries = frappe.db.sql(
-			"""select serial_no from `tabStock Ledger Entry`
-			where serial_no like %s and item_code=%s and is_cancelled=0""",
-			("%%%s%%" % self.name, self.item_code),
-			as_dict=True,
-		)
+		StockLedgerEntry = frappe.qb.DocType("Stock Ledger Entry")
+		sl_entries = (
+			frappe.qb.from_(StockLedgerEntry)
+			.select(StockLedgerEntry.serial_no)
+			.where(
+				(StockLedgerEntry.serial_no.like("%" + self.name + "%"))
+				& (StockLedgerEntry.item_code == self.item_code)
+				& (StockLedgerEntry.is_cancelled == 0)
+			)
+		).run(as_dict=True)
 
 		# Find the exact match
 		sle_exists = False
