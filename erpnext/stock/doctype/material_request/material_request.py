@@ -259,10 +259,10 @@ class MaterialRequest(BuyingController):
 		self.set_status(update=True, status="Cancelled")
 
 	def check_modified_date(self):
-		mod_db = frappe.db.sql("""select modified from `tabMaterial Request` where name = %s""", self.name)
-		date_diff = frappe.db.sql(f"""select TIMEDIFF('{mod_db[0][0]}', '{cstr(self.modified)}')""")
+		MR = frappe.qb.DocType("Material Request")
+		mod_db = (frappe.qb.from_(MR).select(MR.modified).where(MR.name == self.name)).run()
 
-		if date_diff and date_diff[0][0]:
+		if mod_db and cstr(mod_db[0][0]) != cstr(self.modified):
 			frappe.throw(_("{0} {1} has been modified. Please refresh.").format(_(self.doctype), self.name))
 
 	def update_status(self, status):
