@@ -819,12 +819,13 @@ def update_billed_amount_based_on_so(so_detail, update_modified=True):
 			billed_against_so -= billed_amt_against_dn
 		else:
 			# Get billed amount directly against Delivery Note
-			billed_amt_against_dn = frappe.db.sql(
-				"""select sum(amount) from `tabSales Invoice Item`
-				where dn_detail=%s and docstatus=1""",
-				dnd.name,
-			)
-			billed_amt_against_dn = billed_amt_against_dn and billed_amt_against_dn[0][0] or 0
+			SalesInvoiceItem = frappe.qb.DocType("Sales Invoice Item")
+			result = (
+				frappe.qb.from_(SalesInvoiceItem)
+				.select(Sum(SalesInvoiceItem.amount))
+				.where((SalesInvoiceItem.dn_detail == dnd.name) & (SalesInvoiceItem.docstatus == 1))
+			).run()
+			billed_amt_against_dn = flt(result[0][0]) if result and result[0][0] else 0
 
 		# Distribute billed amount directly against SO between DNs based on FIFO
 		if billed_against_so and billed_amt_against_dn < dnd.amount:
