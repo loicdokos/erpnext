@@ -751,14 +751,19 @@ class PaymentEntry(AccountsController):
 	def validate_journal_entry(self):
 		for d in self.get("references"):
 			if d.allocated_amount and d.reference_doctype == "Journal Entry":
-				je_accounts = frappe.db.sql(
-					"""select debit, credit from `tabJournal Entry Account`
-					where account = %s and party=%s and docstatus = 1 and parent = %s
-					and (reference_type is null or reference_type in ("", "Sales Order", "Purchase Order"))
-					""",
-					(self.party_account, self.party, d.reference_name),
-					as_dict=True,
-				)
+				JEA = frappe.qb.DocType("Journal Entry Account")
+				je_accounts = (
+					frappe.qb.from_(JEA)
+					.select(JEA.debit, JEA.credit)
+					.where(JEA.account == self.party_account)
+					.where(JEA.party == self.party)
+					.where(JEA.docstatus == 1)
+					.where(JEA.parent == d.reference_name)
+					.where(
+						JEA.reference_type.isnull()
+						| JEA.reference_type.isin(["", "Sales Order", "Purchase Order"])
+					)
+				).run(as_dict=True)
 
 				if not je_accounts:
 					frappe.throw(
