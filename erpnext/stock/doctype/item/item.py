@@ -534,10 +534,14 @@ class Item(Document):
 			for item_barcode in self.barcodes:
 				options = frappe.get_meta("Item Barcode").get_options("barcode_type").split("\n")
 				if item_barcode.barcode:
-					duplicate = frappe.db.sql(
-						"""select parent from `tabItem Barcode` where barcode = %s and parent != %s""",
-						(item_barcode.barcode, self.name),
-					)
+					ItemBarcode = frappe.qb.DocType("Item Barcode")
+					duplicate = (
+						frappe.qb.from_(ItemBarcode)
+						.select(ItemBarcode.parent)
+						.where(
+							(ItemBarcode.barcode == item_barcode.barcode) & (ItemBarcode.parent != self.name)
+						)
+					).run()
 					if duplicate:
 						frappe.throw(
 							_("Barcode {0} already used in Item {1}").format(
