@@ -209,11 +209,16 @@ class PackingSlip(StatusUpdater):
 def item_details(doctype: str, txt: str, searchfield: str, start: int, page_len: int, filters: dict):
 	from erpnext.controllers.queries import get_match_cond
 
-	return frappe.db.sql(
-		"""select name, item_name, description from `tabItem`
-				where name in ( select item_code FROM `tabDelivery Note Item`
-	 						where parent= {})
-	 			and {} like "{}" {}
-	 			limit  {} offset {} """.format("%s", searchfield, "%s", get_match_cond(doctype), "%s", "%s"),
-		((filters or {}).get("delivery_note"), "%%%s%%" % txt, page_len, start),
+	Item = frappe.qb.DocType("Item")
+	DNItem = frappe.qb.DocType("Delivery Note Item")
+	delivery_note = (filters or {}).get("delivery_note")
+	subquery = frappe.qb.from_(DNItem).select(DNItem.item_code).where(DNItem.parent == delivery_note)
+	item_field = getattr(Item, searchfield)
+	query = (
+		frappe.get_query("Item", ignore_permissions=False)
+		.select(Item.name, Item.item_name, Item.description)
+		.where(Item.name.isin(subquery))
+		.where(item_field.like(f"%{txt}%"))
 	)
+	query = query.limit(page_len).offset(start)
+	return query.run()
